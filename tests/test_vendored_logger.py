@@ -8,8 +8,8 @@ from pathlib import Path
 
 # Test imports
 try:
-    from laketrace import get_laketrace_logger, detect_runtime
-    from laketrace.core_logger import VendoredLogger, LogLevel
+    from laketrace import get_logger, Logger, create_logger, detect_runtime
+    from laketrace.core_logger import _CoreLogger, LogLevel
     print("✓ All imports successful (no Loguru dependency)")
 except ImportError as e:
     print(f"✗ Import failed: {e}")
@@ -34,23 +34,31 @@ try:
             "stdout": False,  # Don't pollute test output
         }
         
-        logger = get_laketrace_logger("test_logger", config)
+        logger_instance = get_logger("test_logger", config)
         print("✓ Logger instance created")
         
+        # Test alternative factory
+        logger_alt = create_logger("test_logger_alt", config)
+        print("✓ Alternative factory works")
+        
+        # Test direct class usage
+        logger_direct = Logger("test_logger_direct", config)
+        print("✓ Direct class instantiation works")
+        
         # Test logging
-        logger.info("Test info message")
-        logger.debug("Test debug message", extra_field="value")
-        logger.warning("Test warning")
+        logger_instance.info("Test info message")
+        logger_instance.debug("Test debug message", extra_field="value")
+        logger_instance.warning("Test warning")
         
         try:
             raise ValueError("Test exception")
         except ValueError:
-            logger.exception("Caught an exception")
+            logger_instance.exception("Caught an exception")
         
         print("✓ All log methods work")
         
         # Test binding
-        bound = logger.bind(user_id="123", session="abc")
+        bound = logger_instance.bind(user_id="123", session="abc")
         bound.info("Message with context")
         print("✓ Context binding works")
         
@@ -67,7 +75,7 @@ try:
         
         # Test tail
         print("\n--- Last 5 log lines (tail) ---")
-        logger.tail(5)
+        logger_instance.tail(5)
         print("--- End of log tail ---\n")
 
 except Exception as e:

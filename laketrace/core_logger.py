@@ -268,14 +268,14 @@ class TextFormatter:
         return formatted + "\n"
 
 
-class VendoredLogger:
+class _CoreLogger:
     """
-    Production-grade logger without external dependencies.
+    Production-grade logger engine without external dependencies.
     
-    Inspired by Loguru but standalone and enterprise-ready.
+    Internal implementation - use via Logger public API.
     """
     
-    _instances: Dict[str, "VendoredLogger"] = {}
+    _instances: Dict[str, "_CoreLogger"] = {}
     _instances_lock = threading.Lock()
     
     def __init__(self, name: str):
@@ -286,7 +286,7 @@ class VendoredLogger:
         self._min_level = LogLevel.INFO
     
     @classmethod
-    def get_logger(cls, name: str) -> "VendoredLogger":
+    def get_logger(cls, name: str) -> "_CoreLogger":
         """Get or create logger instance."""
         with cls._instances_lock:
             if name not in cls._instances:
@@ -382,7 +382,7 @@ class VendoredLogger:
 class BoundLogger:
     """Logger with bound context."""
     
-    def __init__(self, logger: VendoredLogger, context: Dict[str, Any]):
+    def __init__(self, logger: _CoreLogger, context: Dict[str, Any]):
         self._logger = logger
         self._context = context
     

@@ -16,23 +16,23 @@ Key Features:
 - Spark-safe (driver-only pattern)
 - Thread-safe and notebook re-execution safe
 
-Example Usage:
+Recommended Import Patterns:
     ```python
-    from laketrace import get_laketrace_logger
+    # Safe: No name conflicts
+    from laketrace import get_logger
+    log = get_logger("my_job")
     
-    logger = get_laketrace_logger("my_job")
-    logger.info("Starting data processing")
+    # Alternative: Direct class usage
+    from laketrace import Logger
+    log = Logger("my_job")
     
-    # Bind context
-    bound = logger.bind(stage="extract", dataset="sales")
-    bound.info("Processing sales data")
-    
-    # At end of job, optionally upload to lakehouse
-    logger.upload_log_to_lakehouse("Files/logs/my_job.log")
+    # With alias to avoid conflicts
+    from laketrace import get_logger as trace_logger
+    log = trace_logger("my_job")
     ```
 """
 
-from laketrace.logger import LakeTraceLogger, get_laketrace_logger
+from laketrace.logger import Logger, get_logger, create_logger
 from laketrace.runtime import detect_runtime, stop_spark_if_active
 from laketrace.security import (
     sanitize_message,
@@ -44,8 +44,9 @@ from laketrace.security import (
 __version__ = "1.0.0"
 __all__ = [
     # Core API
-    "LakeTraceLogger",
-    "get_laketrace_logger",
+    "Logger",
+    "get_logger",
+    "create_logger",
     # Runtime utilities
     "detect_runtime",
     "stop_spark_if_active",

@@ -21,12 +21,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from laketrace.core_logger import (
-    VendoredLogger,
+    _CoreLogger,
     FileHandler,
     StreamHandler,
     JSONFormatter,
     TextFormatter,
     LogLevel,
+    BoundLogger,
 )
 from laketrace.runtime import detect_runtime
 from laketrace.config import LakeTraceConfig
@@ -35,10 +36,10 @@ from laketrace.security import sanitize_message, mask_pii
 
 # Global lock to prevent duplicate handler registration
 _logger_lock = threading.Lock()
-_initialized_loggers: Dict[str, "LakeTraceLogger"] = {}
+_initialized_loggers: Dict[str, "Logger"] = {}
 
 
-class LakeTraceLogger:
+class Logger:
     """
     Production-grade logger for Spark data platforms.
     
@@ -59,12 +60,12 @@ class LakeTraceLogger:
     
     Example:
         ```python
-        logger = LakeTraceLogger("my_etl_job")
-        logger.info("Starting ETL process")
+        log = logger("my_etl_job")
+        log.info("Starting ETL process")
         
         # Bind context for structured logging
-        stage_logger = logger.bind(stage="extract", source="sales_db")
-        stage_logger.info("Extracting data")
+        stage_log = log.bind(stage="extract", source="sales_db")
+        stage_log.info("Extracting data")
         ```
     """
     
@@ -75,12 +76,17 @@ class LakeTraceLogger:
         run_id: Optional[str] = None,
     ):
         """Initialize the logger with configuration."""
+        print(f"[DEBUG] Logger.__init__ called for: {name}")
         self.name = name
+        print(f"[DEBUG] Creating config...")
         self.config = LakeTraceConfig(config or {})
+        print(f"[DEBUG] Config created, level={self.config.level}")
         self.run_id = run_id or os.getenv("LAKEHOUSE_CONTEXT_RUN_ID", "")
         
         # Get runtime metadata once
+        print(f"[DEBUG] Detecting runtime...")
         self.runtime_metadata = detect_runtime()
+        print(f"[DEBUG] Runtime detected: {self.runtime_metadata.platform.value}")
         
         # Track bound context
         self._bound_context: Dict[str, Any] = {}
@@ -94,25 +100,30 @@ class LakeTraceLogger:
         self.log_file_path: Optional[Path] = None
         
         # Get core logger instance
-        self._logger = VendoredLogger.get_logger(name)
+        print(f"[DEBUG] Getting core logger...")
+        self._logger = _CoreLogger.get_logger(name)
+        print(f"[DEBUG] Setting level to {self.config.level}...")
         self._logger.set_level(self.config.level)
         
         # Reset handlers on notebook re-execution
+        print(f"[DEBUG] Removing old handlers...")
         self._logger.remove_handlers()
         
         # Setup logging sinks
+        print(f"[DEBUG] Setting up sinks...")
         self._setup_sinks()
+        print(f"[DEBUG] Logger initialization complete!")
     
     def _setup_sinks(self) -> None:
         """Setup logging sinks for file and stdout output."""
-        with _logger_lock:
-            # Setup file sink
-            if self.config.log_dir:
-                self._setup_file_sink()
-            
-            # Setup stdout sink
-            if self.config.stdout:
-                self._setup_stdout_sink()
+        # Note: Already protected by _logger_lock in get_logger()
+        # Setup file sink
+        if self.config.log_dir:
+            self._setup_file_sink()
+        
+        # Setup stdout sink
+        if self.config.stdout:
+            self._setup_stdout_sink()
     
     def _setup_file_sink(self) -> None:
         """Configure local file sink with rotation and secure permissions."""
@@ -192,7 +203,7 @@ class LakeTraceLogger:
         
         return f"{timestamp} | {level:8} | {self.name}{context_str} | {message}\n"
     
-    def bind(self, **kwargs: Any) -> "LakeTraceLogger":
+    def bind(self, **kwargs: Any) -> "BoundLogger":
         """
         Create a new logger with bound context fields.
         
@@ -203,25 +214,16 @@ class LakeTraceLogger:
             **kwargs: Key-value pairs to bind to the logger
         
         Returns:
-            New LakeTraceLogger instance with bound context
+            Logger instance with bound context
         
         Example:
             ```python
-            base_logger = get_laketrace_logger("etl")
-            stage_logger = base_logger.bind(stage="extract", dataset="sales")
-            stage_logger.info("Processing")  # Will include stage and dataset fields
+            base_log = logger("etl")
+            stage_log = base_log.bind(stage="extract", dataset="sales")
+            stage_log.info("Processing")  # Will include stage and dataset fields
             ```
         """
-        bound_logger = object.__new__(LakeTraceLogger)
-        bound_logger.name = self.name
-        bound_logger.config = self.config
-        bound_logger.run_id = self.run_id
-        bound_logger.runtime_metadata = self.runtime_metadata
-        bound_logger.log_file_path = self.log_file_path
-        bound_logger._logger = self._logger
-        bound_logger._bound_context = {**self._bound_context, **kwargs}
-        
-        return bound_logger
+        return BoundLogger(self._logger, {**self._bound_context, **kwargs})
     
     def trace(self, message: str, **kwargs: Any) -> None:
         """Log trace-level message."""
@@ -489,13 +491,13 @@ class LakeTraceLogger:
 
 
 
-def get_laketrace_logger(
+def get_logger(
     name: str,
     config: Optional[Dict[str, Any]] = None,
     run_id: Optional[str] = None,
-) -> LakeTraceLogger:
+) -> Logger:
     """
-    Get or create a LakeTrace logger instance.
+    Get or create a logger instance.
     
     This is the primary factory function for creating loggers. It ensures that
     only one logger instance exists per name to prevent duplicate handlers.
@@ -506,18 +508,18 @@ def get_laketrace_logger(
         run_id: Optional run identifier for correlation
     
     Returns:
-        LakeTraceLogger instance
+        Logger instance
     
     Example:
         ```python
-        from laketrace import get_laketrace_logger
+        from laketrace import get_logger
         
         # Basic usage
-        logger = get_laketrace_logger("my_job")
-        logger.info("Processing started")
+        log = get_logger("my_job")
+        log.info("Processing started")
         
         # With custom configuration
-        logger = get_laketrace_logger(
+        log = get_logger(
             "my_job",
             config={
                 "log_dir": "/custom/log/path",
@@ -533,10 +535,11 @@ def get_laketrace_logger(
             return _initialized_loggers[name]
         
         # Create new logger
-        logger_instance = LakeTraceLogger(name=name, config=config, run_id=run_id)
+        logger_instance = Logger(name=name, config=config, run_id=run_id)
         _initialized_loggers[name] = logger_instance
         
         return logger_instance
 
-        
-        return logger_instance
+
+# Alias for convenience (can be used with 'as' to avoid conflicts)
+create_logger = get_logger
