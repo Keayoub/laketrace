@@ -7,6 +7,7 @@ and extract runtime metadata for logging context.
 
 import os
 import socket
+from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Any, Optional
 
@@ -18,6 +19,57 @@ class RuntimePlatform(Enum):
     SPARK = "spark"
     LOCAL = "local"
     UNKNOWN = "unknown"
+
+
+class RuntimeType(Enum):
+    """Type of runtime execution."""
+    NOTEBOOK = "notebook"
+    JOB = "job"
+    SCRIPT = "script"
+    LOCAL = "local"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class RuntimeContext:
+    """Context information about the runtime environment."""
+    platform: RuntimePlatform
+    runtime_type: RuntimeType
+    hostname: str
+    pid: int
+    run_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    
+    def __post_init__(self):
+        """Ensure metadata is always a dict."""
+        if self.metadata is None:
+            self.metadata = {}
+
+
+def detect_runtime() -> RuntimeContext:
+    """
+    Detect runtime and return context information.
+    
+    Returns:
+        RuntimeContext with platform, type, and metadata
+    """
+    detector = RuntimeDetector()
+    platform = detector.detect_platform()
+    runtime_type = detector.detect_runtime_type()
+    hostname = detector._get_hostname()
+    pid = os.getpid()
+    run_id = get_run_id_from_environment()
+    metadata = detector.get_runtime_metadata()
+    
+    return RuntimeContext(
+        platform=platform,
+        runtime_type=runtime_type,
+        hostname=hostname,
+        pid=pid,
+        run_id=run_id,
+        metadata=metadata,
+    )
+
 
 
 class RuntimeDetector:
@@ -69,6 +121,64 @@ class RuntimeDetector:
         
         cls._cached_platform = RuntimePlatform.UNKNOWN
         return cls._cached_platform
+    
+    @classmethod
+    def detect_runtime_type(cls) -> RuntimeType:
+        """
+        Detect the type of runtime (notebook, job, script, etc.).
+        
+        Returns:
+            RuntimeType enum value
+        """
+        # Check for notebook environment (Fabric or Databricks)
+        if cls._is_notebook():
+            return RuntimeType.NOTEBOOK
+        
+        # Check for job execution
+        if cls._is_job():
+            return RuntimeType.JOB
+        
+        # Check for script execution
+        if cls._is_script():
+            return RuntimeType.SCRIPT
+        
+        # Check for local
+        if cls.detect_platform() == RuntimePlatform.LOCAL:
+            return RuntimeType.LOCAL
+        
+        return RuntimeType.UNKNOWN
+    
+    @staticmethod
+    def _is_notebook() -> bool:
+        """Check if running in a notebook environment."""
+        # Fabric notebook
+        if "SYNAPSE_COMPUTATION_ENDPOINT_HOSTNAME" in os.environ:
+            return True
+        
+        # Databricks notebook
+        if "DATABRICKS_SOURCE_CODE_CELL_FILENAME" in os.environ:
+            return True
+        
+        return False
+    
+    @staticmethod
+    def _is_job() -> bool:
+        """Check if running as a job."""
+        # Databricks job
+        if "DB_JOB_ID" in os.environ and "DB_JOB_RUN_ID" in os.environ:
+            return True
+        
+        # Fabric Spark job
+        if "FABRIC_JOB_ID" in os.environ:
+            return True
+        
+        return False
+    
+    @staticmethod
+    def _is_script() -> bool:
+        """Check if running as a script."""
+        # Basic heuristic: if Spark is available but not notebook/job, it's a script
+        return RuntimeDetector._is_spark()
     
     @classmethod
     def get_runtime_metadata(cls) -> Dict[str, Any]:

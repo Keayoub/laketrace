@@ -1,7 +1,7 @@
 """
-LakeTrace Core Logger - Production-grade logging inspired by Loguru.
+LakeTrace Core Logger - Production-grade logging
 
-This is a vendored, standalone logging implementation built for enterprise use.
+This is standalone logging implementation built for enterprise use.
 Designed specifically for Microsoft Fabric and Databricks environments.
 
 Key features:

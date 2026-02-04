@@ -1,33 +1,36 @@
 """
-Core logging implementation using Loguru.
+LakeTrace Logger - Enterprise-grade logging for Fabric & Databricks.
 
-Provides the LakeTraceLogger class with safe local file rotation,
-structured JSON output, and optional lakehouse storage integration.
+Vendored, zero-dependency implementation (stdlib only).
+Designed for security, performance, and multi-platform compatibility.
 
 Security Features:
 - File permissions: Log files created with 0o600 (owner read/write only)
-- Log injection prevention: Newlines and special chars escaped by default
+- Log injection prevention: Newlines and special chars escaped
 - PII masking: Optional masking of sensitive fields
+- No network I/O during logging (upload only at end-of-run)
+- Bounded retries only on lakehouse upload
 """
 
 import json
 import os
 import sys
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
-import threading
 
-from loguru import logger as loguru_logger
-
-from laketrace.config import LakeTraceConfig
-from laketrace.runtime import RuntimeDetector, get_run_id_from_environment
-from laketrace.security import (
-    get_secure_file_opener,
-    sanitize_message,
-    mask_pii,
-    SecurityConfig,
+from laketrace.core_logger import (
+    VendoredLogger,
+    FileHandler,
+    StreamHandler,
+    JSONFormatter,
+    TextFormatter,
+    LogLevel,
 )
+from laketrace.runtime import detect_runtime
+from laketrace.config import LakeTraceConfig
+from laketrace.security import sanitize_message, mask_pii
 
 
 # Global lock to prevent duplicate handler registration
@@ -73,37 +76,39 @@ class LakeTraceLogger:
     ):
         """Initialize the logger with configuration."""
         self.name = name
-        self.config = LakeTraceConfig(config)
-        self.run_id = run_id or get_run_id_from_environment()
+        self.config = LakeTraceConfig(config or {})
+        self.run_id = run_id or os.getenv("LAKEHOUSE_CONTEXT_RUN_ID", "")
         
         # Get runtime metadata once
-        self.runtime_metadata = RuntimeDetector.get_runtime_metadata()
+        self.runtime_metadata = detect_runtime()
         
         # Track bound context
         self._bound_context: Dict[str, Any] = {}
-
+        self._bound_context["platform"] = self.runtime_metadata.platform.value
+        self._bound_context["runtime_type"] = self.runtime_metadata.runtime_type.value
+        
+        if self.run_id:
+            self._bound_context["run_id"] = self.run_id
+        
         # Track log file path
         self.log_file_path: Optional[Path] = None
         
-        # Initialize loguru logger
-        self._logger = loguru_logger.bind(logger_name=name)
+        # Get core logger instance
+        self._logger = VendoredLogger.get_logger(name)
+        self._logger.set_level(self.config.level)
+        
+        # Reset handlers on notebook re-execution
+        self._logger.remove_handlers()
         
         # Setup logging sinks
         self._setup_sinks()
     
     def _setup_sinks(self) -> None:
-        """
-        Setup loguru sinks for file and stdout output.
-        
-        This method is idempotent - calling it multiple times (e.g., in notebook
-        re-executions) will not create duplicate handlers.
-        """
+        """Setup logging sinks for file and stdout output."""
         with _logger_lock:
-            # Remove existing handlers to prevent duplicates
-            self._logger.remove()
-            
             # Setup file sink
-            self._setup_file_sink()
+            if self.config.log_dir:
+                self._setup_file_sink()
             
             # Setup stdout sink
             if self.config.stdout:
@@ -114,114 +119,72 @@ class LakeTraceLogger:
         log_dir = Path(self.config.log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         
-        # Determine compression extension
-        compression_ext = ""
-        if self.config.compression == "zip":
-            compression_ext = ".zip"
-        elif self.config.compression == "gz":
-            compression_ext = ".gz"
-        
         # Construct log file path
         log_file = log_dir / f"{self.name}.log"
         self.log_file_path = log_file
         
+        # Determine formatter
+        if self.config.json:
+            formatter = lambda record: self._format_json(record)
+        else:
+            formatter = lambda record: self._format_text(record)
+        
         # Rotation size in bytes
-        rotation_bytes = f"{self.config.rotation_mb} MB"
+        rotation_bytes = self.config.rotation_mb * 1024 * 1024 if self.config.rotation_mb else None
         
-        # Get secure file opener if enabled
-        opener = get_secure_file_opener() if self.config.secure_file_permissions else None
-        
-        # Configure file handler
-        self._logger.add(
+        # Create file handler
+        file_handler = FileHandler(
             str(log_file),
-            format=self._format_json if self.config.json else self._format_text,
-            level=self.config.level,
-            rotation=rotation_bytes,
-            retention=self.config.retention_files,
-            compression=self.config.compression if self.config.compression != "none" else None,
-            enqueue=self.config.enqueue,
-            catch=True,  # Don't let logging errors crash the application
-            opener=opener,  # Use secure permissions (0o600) if enabled
+            rotation_size=rotation_bytes,
+            retention_count=self.config.retention_files,
+            formatter=formatter,
         )
+        
+        self._logger.add_handler(file_handler)
     
     def _setup_stdout_sink(self) -> None:
         """Configure stdout sink for job output visibility."""
-        self._logger.add(
-            sys.stdout,
-            format=self._format_json if self.config.json else self._format_text,
-            level=self.config.level,
-            enqueue=self.config.enqueue,
-            catch=True,
-            colorize=not self.config.json,  # Only colorize for text format
-        )
+        if self.config.json:
+            formatter = lambda record: self._format_json(record)
+        else:
+            formatter = lambda record: self._format_text(record)
+        
+        stream_handler = StreamHandler(sys.stdout, formatter=formatter)
+        self._logger.add_handler(stream_handler)
     
-    def _format_json(self, record: Dict[str, Any]) -> str:
-        """
-        Format log record as JSON.
-        
-        Args:
-            record: Loguru record dictionary
-        
-        Returns:
-            JSON string with newline
-        """
-        # Build structured log entry
+    def _format_json(self, record) -> str:
+        """Format log record as JSON."""
         log_entry = {
-            "timestamp": record["time"].astimezone(timezone.utc).isoformat(),
-            "level": record["level"].name,
-            "message": record["message"],
+            "timestamp": record.timestamp.isoformat(),
+            "level": record.level.name,
+            "message": record.message,
             "logger_name": self.name,
+            "hostname": record.hostname,
+            "pid": record.process_id,
         }
         
-        # Add runtime context if enabled
-        if self.config.add_runtime_context:
-            log_entry["hostname"] = self.runtime_metadata.get("hostname", "unknown")
-            log_entry["pid"] = self.runtime_metadata.get("pid", 0)
-            log_entry["platform"] = self.runtime_metadata.get("platform", "unknown")
-            log_entry["runtime_type"] = self.runtime_metadata.get("platform", "unknown")
-        
-        # Add run_id if available
-        if self.run_id:
-            log_entry["run_id"] = self.run_id
-        
-        # Add bound context
-        if self._bound_context:
-            log_entry.update(self._bound_context)
-        
-        # Add extra fields from record
-        if record.get("extra"):
-            for key, value in record["extra"].items():
-                if key not in log_entry and key != "logger_name":
-                    log_entry[key] = value
+        # Add all context fields
+        log_entry.update(record.extra)
         
         # Add exception info if present
-        if record.get("exception"):
+        if record.exception:
+            import traceback
             log_entry["exception"] = {
-                "type": record["exception"].type.__name__ if record["exception"].type else None,
-                "value": str(record["exception"].value) if record["exception"].value else None,
+                "type": record.exception.__class__.__name__,
+                "value": str(record.exception),
+                "traceback": traceback.format_exc(),
             }
         
         return json.dumps(log_entry) + "\n"
     
-    def _format_text(self, record: Dict[str, Any]) -> str:
-        """
-        Format log record as human-readable text.
-        
-        Args:
-            record: Loguru record dictionary
-        
-        Returns:
-            Formatted text string with newline
-        """
-        timestamp = record["time"].strftime("%Y-%m-%d %H:%M:%S")
-        level = record["level"].name
-        message = record["message"]
+    def _format_text(self, record) -> str:
+        """Format log record as human-readable text."""
+        timestamp = record.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+        level = record.level.name
+        message = record.message
         
         # Build context string
         context_parts = []
-        if self.run_id:
-            context_parts.append(f"run_id={self.run_id}")
-        
         for key, value in self._bound_context.items():
             context_parts.append(f"{key}={value}")
         
@@ -255,52 +218,63 @@ class LakeTraceLogger:
         bound_logger.run_id = self.run_id
         bound_logger.runtime_metadata = self.runtime_metadata
         bound_logger.log_file_path = self.log_file_path
+        bound_logger._logger = self._logger
         bound_logger._bound_context = {**self._bound_context, **kwargs}
-        bound_logger._logger = self._logger.bind(**kwargs)
-
+        
         return bound_logger
     
     def trace(self, message: str, **kwargs: Any) -> None:
         """Log trace-level message."""
-        self._logger.trace(message, **kwargs)
+        extra = {**self._bound_context, **kwargs}
+        self._logger._log(LogLevel.TRACE, message, extra=extra or None)
     
     def debug(self, message: str, **kwargs: Any) -> None:
         """Log debug-level message."""
-        self._logger.debug(message, **kwargs)
+        extra = {**self._bound_context, **kwargs}
+        self._logger._log(LogLevel.DEBUG, message, extra=extra or None)
     
     def info(self, message: str, **kwargs: Any) -> None:
         """Log info-level message."""
         if self.config.sanitize_messages:
             message = sanitize_message(message)
-        self._logger.info(message, **kwargs)
+        extra = {**self._bound_context, **kwargs}
+        self._logger._log(LogLevel.INFO, message, extra=extra or None)
     
     def success(self, message: str, **kwargs: Any) -> None:
         """Log success-level message."""
         if self.config.sanitize_messages:
             message = sanitize_message(message)
-        self._logger.success(message, **kwargs)
+        extra = {**self._bound_context, **kwargs}
+        self._logger._log(LogLevel.SUCCESS, message, extra=extra or None)
     
     def warning(self, message: str, **kwargs: Any) -> None:
         """Log warning-level message."""
         if self.config.sanitize_messages:
             message = sanitize_message(message)
-        self._logger.warning(message, **kwargs)
+        extra = {**self._bound_context, **kwargs}
+        self._logger._log(LogLevel.WARNING, message, extra=extra or None)
     
     def error(self, message: str, **kwargs: Any) -> None:
         """Log error-level message."""
         if self.config.sanitize_messages:
             message = sanitize_message(message)
-        self._logger.error(message, **kwargs)
+        extra = {**self._bound_context, **kwargs}
+        self._logger._log(LogLevel.ERROR, message, extra=extra or None)
     
     def critical(self, message: str, **kwargs: Any) -> None:
         """Log critical-level message."""
-        self._logger.critical(message, **kwargs)
+        extra = {**self._bound_context, **kwargs}
+        self._logger._log(LogLevel.CRITICAL, message, extra=extra or None)
     
     def exception(self, message: str, **kwargs: Any) -> None:
         """Log exception with traceback."""
         if self.config.sanitize_messages:
             message = sanitize_message(message)
-        self._logger.exception(message, **kwargs)
+        extra = {**self._bound_context, **kwargs}
+        try:
+            raise
+        except Exception as e:
+            self._logger._log(LogLevel.ERROR, message, exception=e, extra=extra or None)
     
     def log_structured(
         self,
@@ -339,11 +313,12 @@ class LakeTraceLogger:
             data = mask_pii(data)
 
         # Log with data as extra fields
-        log_method = getattr(self._logger, level.lower(), self._logger.info)
+        level_obj = LogLevel[level.upper()]
+        combined_extra = {**self._bound_context}
         if data:
-            log_method(message, extra=data)
-        else:
-            log_method(message)
+            combined_extra.update(data)
+        
+        self._logger._log(level_obj, message, extra=combined_extra or None)
     
     def tail(self, n: int = 50) -> None:
         """
@@ -408,7 +383,7 @@ class LakeTraceLogger:
             self.warning(f"Cannot upload: log file not found at {self.log_file_path}")
             return False
         
-        platform = self.runtime_metadata.get("platform", "unknown")
+        platform = self.runtime_metadata.platform.value
         
         try:
             # Read log file content once
@@ -513,6 +488,7 @@ class LakeTraceLogger:
         return False
 
 
+
 def get_laketrace_logger(
     name: str,
     config: Optional[Dict[str, Any]] = None,
@@ -559,5 +535,8 @@ def get_laketrace_logger(
         # Create new logger
         logger_instance = LakeTraceLogger(name=name, config=config, run_id=run_id)
         _initialized_loggers[name] = logger_instance
+        
+        return logger_instance
+
         
         return logger_instance
