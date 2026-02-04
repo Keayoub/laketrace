@@ -78,6 +78,11 @@ try:
         logger_instance.tail(5)
         print("--- End of log tail ---\n")
 
+        # Close loggers to release file handles
+        logger_instance.close()
+        logger_alt.close()
+        logger_direct.close()
+
 except Exception as e:
     print(f"✗ Logger test failed: {e}")
     import traceback

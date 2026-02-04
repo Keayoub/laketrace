@@ -135,33 +135,59 @@ class Logger:
         self.log_file_path = log_file
         
         # Determine formatter
-        if self.config.json:
-            formatter = lambda record: self._format_json(record)
-        else:
-            formatter = lambda record: self._format_text(record)
-        
-        # Rotation size in bytes
-        rotation_bytes = self.config.rotation_mb * 1024 * 1024 if self.config.rotation_mb else None
-        
-        # Create file handler
+        formatter = self._resolve_formatter(is_json=self.config.json)
+
+        # Rotation configuration
+        rotation = self.config.rotation
+        if rotation is None and self.config.rotation_mb:
+            rotation = int(self.config.rotation_mb * 1024 * 1024)
+
+        # Retention configuration
+        retention = self.config.retention
+        if retention is None:
+            retention = self.config.retention_files
+
+        # Compression configuration
+        compression = self.config.compression if self.config.compression != "none" else None
+
         file_handler = FileHandler(
             str(log_file),
-            rotation_size=rotation_bytes,
-            retention_count=self.config.retention_files,
+            rotation=rotation,
+            retention=retention,
+            compression=compression,
             formatter=formatter,
+            filter_func=self.config.filter,
+            enqueue=self.config.enqueue,
+            catch=self.config.catch,
+            secure_permissions=self.config.secure_file_permissions,
         )
-        
+
         self._logger.add_handler(file_handler)
     
     def _setup_stdout_sink(self) -> None:
         """Configure stdout sink for job output visibility."""
-        if self.config.json:
-            formatter = lambda record: self._format_json(record)
-        else:
-            formatter = lambda record: self._format_text(record)
-        
-        stream_handler = StreamHandler(sys.stdout, formatter=formatter)
+        formatter = self._resolve_formatter(is_json=self.config.json)
+
+        stream_handler = StreamHandler(
+            sys.stdout,
+            formatter=formatter,
+            filter_func=self.config.filter,
+            enqueue=self.config.enqueue,
+            catch=self.config.catch,
+        )
         self._logger.add_handler(stream_handler)
+
+    def _resolve_formatter(self, is_json: bool) -> Any:
+        if callable(self.config.formatter):
+            return self.config.formatter
+
+        if not is_json and self.config.format:
+            return TextFormatter(self.config.format).format
+
+        if is_json:
+            return lambda record: self._format_json(record)
+
+        return lambda record: self._format_text(record)
     
     def _format_json(self, record) -> str:
         """Format log record as JSON."""
@@ -173,19 +199,26 @@ class Logger:
             "hostname": record.hostname,
             "pid": record.process_id,
         }
-        
+
         # Add all context fields
         log_entry.update(record.extra)
-        
-        # Add exception info if present
+
+        if self.config.serialize:
+            log_entry.update(
+                {
+                    "thread_id": record.thread_id,
+                    "process_id": record.process_id,
+                }
+            )
+
         if record.exception:
             import traceback
             log_entry["exception"] = {
                 "type": record.exception.__class__.__name__,
                 "value": str(record.exception),
-                "traceback": traceback.format_exc(),
+                "traceback": "".join(traceback.format_exception(type(record.exception), record.exception, record.exception.__traceback__)),
             }
-        
+
         return json.dumps(log_entry) + "\n"
     
     def _format_text(self, record) -> str:
@@ -346,6 +379,15 @@ class Logger:
                 print("=" * 70)
         except Exception as e:
             print(f"Error reading log file: {e}")
+
+    def close(self) -> None:
+        """Close all handlers and release resources."""
+        try:
+            self._logger.remove_handlers()
+        finally:
+            with _logger_lock:
+                if self.name in _initialized_loggers:
+                    _initialized_loggers.pop(self.name, None)
     
     def upload_log_to_lakehouse(
         self,

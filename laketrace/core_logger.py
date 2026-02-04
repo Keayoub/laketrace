@@ -14,17 +14,22 @@ Key features:
 - No external dependencies
 """
 
+import atexit
+import glob
 import os
+import queue
 import sys
 import json
 import threading
 import traceback
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Callable, List, Union
 from enum import Enum
-from io import StringIO
+
+from laketrace.rotation import make_rotation_function
+from laketrace.retention import make_retention_function
+from laketrace.compression import make_compression_function
 
 
 class LogLevel(Enum):
@@ -63,149 +68,235 @@ class LogRecord:
 
 class Handler:
     """Base handler for log records."""
-    
+
+    def __init__(
+        self,
+        formatter: Optional[Callable[[LogRecord], str]] = None,
+        filter_func: Optional[Callable[[LogRecord], bool]] = None,
+        enqueue: bool = False,
+        catch: bool = True,
+    ):
+        self.formatter = formatter
+        self.filter_func = filter_func
+        self.enqueue = enqueue
+        self.catch = catch
+        self._lock = threading.Lock()
+        self._queue: Optional[queue.Queue] = None
+        self._thread: Optional[threading.Thread] = None
+
+        if self.enqueue:
+            self._queue = queue.Queue()
+            self._thread = threading.Thread(target=self._queued_writer, daemon=True)
+            self._thread.start()
+
+    def _should_log(self, record: LogRecord) -> bool:
+        if self.filter_func is None:
+            return True
+        try:
+            return bool(self.filter_func(record))
+        except Exception:
+            return False
+
     def emit(self, record: LogRecord) -> None:
-        """Emit a log record. Override in subclasses."""
+        """Emit a log record."""
+        if not self._should_log(record):
+            return
+
+        if self.enqueue and self._queue is not None:
+            self._queue.put(record)
+            return
+
+        self._emit(record)
+
+    def _emit(self, record: LogRecord) -> None:
+        """Emit a log record directly (no queue)."""
         raise NotImplementedError
+
+    def _queued_writer(self) -> None:
+        if self._queue is None:
+            return
+        while True:
+            record = self._queue.get()
+            if record is None:
+                break
+            try:
+                self._emit(record)
+            except Exception as e:
+                if self.catch:
+                    print(f"Error in handler: {e}", file=sys.stderr)
+                else:
+                    raise
+
+    def close(self) -> None:
+        """Close the handler and release resources."""
+        if self._queue is not None:
+            self._queue.put(None)
+            if self._thread:
+                self._thread.join(timeout=2)
 
 
 class FileHandler(Handler):
-    """Handler that writes logs to a file with rotation."""
-    
+    """Handler that writes logs to a file with rotation, retention, and compression."""
+
     def __init__(
         self,
         filename: str,
-        rotation_size: Optional[int] = None,
-        retention_count: Optional[int] = None,
+        rotation: Optional[Any] = None,
+        retention: Optional[Any] = None,
+        compression: Optional[Any] = None,
         encoding: str = "utf-8",
         formatter: Optional[Callable[[LogRecord], str]] = None,
+        filter_func: Optional[Callable[[LogRecord], bool]] = None,
+        enqueue: bool = False,
+        catch: bool = True,
+        secure_permissions: bool = True,
     ):
         self.filename = Path(filename)
-        self.rotation_size = rotation_size  # in bytes
-        self.retention_count = retention_count
         self.encoding = encoding
-        self.formatter = formatter or self._default_format
+        self.secure_permissions = secure_permissions
         self.file = None
-        self._lock = threading.Lock()
+        self._rotation_function = make_rotation_function(rotation)
+        self._retention_function = make_retention_function(retention)
+        self._compression_function = make_compression_function(compression)
+
+        super().__init__(
+            formatter=formatter or self._default_format,
+            filter_func=filter_func,
+            enqueue=enqueue,
+            catch=catch,
+        )
+
         self._ensure_dir()
         self._open_file()
-    
+
     def _ensure_dir(self) -> None:
         """Ensure parent directory exists."""
         self.filename.parent.mkdir(parents=True, exist_ok=True)
-    
+
     def _open_file(self) -> None:
         """Open log file with secure permissions."""
         try:
-            # Open with owner read/write only (0o600)
-            fd = os.open(
-                str(self.filename),
-                os.O_WRONLY | os.O_CREAT | os.O_APPEND,
-                0o600
-            )
-            self.file = os.fdopen(fd, 'w', encoding=self.encoding)
+            if self.secure_permissions:
+                fd = os.open(
+                    str(self.filename),
+                    os.O_WRONLY | os.O_CREAT | os.O_APPEND,
+                    0o600,
+                )
+                self.file = os.fdopen(fd, "a", encoding=self.encoding)
+            else:
+                self.file = open(str(self.filename), "a", encoding=self.encoding)
         except Exception as e:
             print(f"Error opening log file: {e}", file=sys.stderr)
-    
-    def _rotate_if_needed(self) -> None:
-        """Rotate log file if size exceeds limit."""
-        if not self.rotation_size or not self.file:
+
+    def _collect_logs(self) -> List[str]:
+        pattern = f"{self.filename}*"
+        return [p for p in glob.glob(pattern) if os.path.isfile(p)]
+
+    def _rotate_if_needed(self, formatted: str) -> None:
+        if not self._rotation_function or not self.file:
             return
-        
+
         try:
-            current_size = self.file.tell()
-            if current_size >= self.rotation_size:
+            if self._rotation_function(formatted, self.file):
                 self._do_rotation()
         except Exception as e:
-            print(f"Error checking rotation: {e}", file=sys.stderr)
-    
+            if self.catch:
+                print(f"Error checking rotation: {e}", file=sys.stderr)
+            else:
+                raise
+
     def _do_rotation(self) -> None:
-        """Perform log file rotation."""
         try:
             if self.file:
                 self.file.close()
-            
-            # Rename current file
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             backup_name = f"{self.filename}.{timestamp}"
             if self.filename.exists():
                 self.filename.rename(backup_name)
-            
-            # Open new file
+
+            if self._compression_function is not None:
+                self._compression_function(str(backup_name))
+
+            if self._retention_function is not None:
+                self._retention_function(self._collect_logs())
+
             self._open_file()
-            
-            # Cleanup old files
-            if self.retention_count:
-                self._cleanup_old_files()
         except Exception as e:
-            print(f"Error rotating log file: {e}", file=sys.stderr)
-    
-    def _cleanup_old_files(self) -> None:
-        """Remove old log files beyond retention count."""
-        try:
-            pattern = f"{self.filename.name}.*"
-            log_dir = self.filename.parent
-            backups = sorted(log_dir.glob(pattern))
-            
-            while len(backups) > self.retention_count:
-                old_file = backups.pop(0)
-                old_file.unlink()
-        except Exception as e:
-            print(f"Error cleaning up old logs: {e}", file=sys.stderr)
-    
+            if self.catch:
+                print(f"Error rotating log file: {e}", file=sys.stderr)
+            else:
+                raise
+
     def _default_format(self, record: LogRecord) -> str:
         """Default text format."""
         timestamp = record.timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         return f"{timestamp} | {record.level.name:8} | {record.logger_name} | {record.message}\n"
-    
-    def emit(self, record: LogRecord) -> None:
-        """Write log record to file."""
+
+    def _emit(self, record: LogRecord) -> None:
         with self._lock:
             try:
-                self._rotate_if_needed()
+                formatted = self.formatter(record) if self.formatter else self._default_format(record)
+                self._rotate_if_needed(formatted)
                 if self.file:
-                    formatted = self.formatter(record)
                     self.file.write(formatted)
                     self.file.flush()
             except Exception as e:
-                print(f"Error writing log: {e}", file=sys.stderr)
-    
+                if self.catch:
+                    print(f"Error writing log: {e}", file=sys.stderr)
+                else:
+                    raise
+
     def close(self) -> None:
-        """Close the log file."""
+        super().close()
         with self._lock:
             if self.file:
                 try:
                     self.file.close()
                 except Exception:
                     pass
+        if self._compression_function is not None and self.filename.exists():
+            try:
+                self._compression_function(str(self.filename))
+            except Exception:
+                pass
 
 
 class StreamHandler(Handler):
     """Handler that writes logs to a stream (e.g., stdout)."""
-    
+
     def __init__(
         self,
         stream: Any = sys.stdout,
         formatter: Optional[Callable[[LogRecord], str]] = None,
+        filter_func: Optional[Callable[[LogRecord], bool]] = None,
+        enqueue: bool = False,
+        catch: bool = True,
     ):
         self.stream = stream
-        self.formatter = formatter or self._default_format
-        self._lock = threading.Lock()
-    
+        super().__init__(
+            formatter=formatter or self._default_format,
+            filter_func=filter_func,
+            enqueue=enqueue,
+            catch=catch,
+        )
+
     def _default_format(self, record: LogRecord) -> str:
         """Default text format."""
         timestamp = record.timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         return f"{timestamp} | {record.level.name:8} | {record.logger_name} | {record.message}\n"
-    
-    def emit(self, record: LogRecord) -> None:
-        """Write log record to stream."""
+
+    def _emit(self, record: LogRecord) -> None:
         with self._lock:
             try:
-                formatted = self.formatter(record)
+                formatted = self.formatter(record) if self.formatter else self._default_format(record)
                 self.stream.write(formatted)
                 self.stream.flush()
             except Exception as e:
-                print(f"Error writing to stream: {e}", file=sys.stderr)
+                if self.catch:
+                    print(f"Error writing to stream: {e}", file=sys.stderr)
+                else:
+                    raise
 
 
 class JSONFormatter:
@@ -277,10 +368,12 @@ class _CoreLogger:
     
     _instances: Dict[str, "_CoreLogger"] = {}
     _instances_lock = threading.Lock()
+    _atexit_registered = False
     
     def __init__(self, name: str):
         self.name = name
-        self.handlers: List[Handler] = []
+        self.handlers: Dict[int, Handler] = {}
+        self._handler_id = 0
         self._context: Dict[str, Any] = {}
         self._lock = threading.Lock()
         self._min_level = LogLevel.INFO
@@ -291,18 +384,31 @@ class _CoreLogger:
         with cls._instances_lock:
             if name not in cls._instances:
                 cls._instances[name] = cls(name)
+                if not cls._atexit_registered:
+                    atexit.register(cls.shutdown_all)
+                    cls._atexit_registered = True
             return cls._instances[name]
     
-    def add_handler(self, handler: Handler) -> None:
+    def add_handler(self, handler: Handler) -> int:
         """Add a handler to the logger."""
         with self._lock:
-            self.handlers.append(handler)
+            handler_id = self._handler_id
+            self._handler_id += 1
+            self.handlers[handler_id] = handler
+            return handler_id
+
+    def remove_handler(self, handler_id: int) -> None:
+        """Remove a handler by id."""
+        with self._lock:
+            handler = self.handlers.pop(handler_id, None)
+            if handler and hasattr(handler, "close"):
+                handler.close()
     
     def remove_handlers(self) -> None:
         """Remove all handlers."""
         with self._lock:
-            for handler in self.handlers:
-                if hasattr(handler, 'close'):
+            for handler in self.handlers.values():
+                if hasattr(handler, "close"):
                     handler.close()
             self.handlers.clear()
     
@@ -337,11 +443,19 @@ class _CoreLogger:
         )
         
         with self._lock:
-            for handler in self.handlers:
+            for handler in self.handlers.values():
+                handler.emit(record)
+
+    @classmethod
+    def shutdown_all(cls) -> None:
+        """Shutdown all logger instances and close handlers."""
+        with cls._instances_lock:
+            for logger in cls._instances.values():
                 try:
-                    handler.emit(record)
-                except Exception as e:
-                    print(f"Error in handler: {e}", file=sys.stderr)
+                    logger.remove_handlers()
+                except Exception:
+                    pass
+            cls._instances.clear()
     
     def trace(self, message: str, **extra: Any) -> None:
         """Log at TRACE level."""

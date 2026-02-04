@@ -46,6 +46,7 @@ __all__ = [
     # Core API
     "Logger",
     "get_logger",
+    "get_laketrace_logger",
     "create_logger",
     # Runtime utilities
     "detect_runtime",
@@ -56,4 +57,7 @@ __all__ = [
     "escape_newlines",
     "escape_format_strings",
 ]
+
+# Backward-compatible alias
+get_laketrace_logger = get_logger
 

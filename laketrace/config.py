@@ -18,14 +18,21 @@ class LakeTraceConfig:
     # Default configuration values
     DEFAULTS: Dict[str, Any] = {
         "log_dir": "/tmp/laketrace_logs",
-        "rotation_mb": 10,  # Rotate after 10 MB
-        "retention_files": 5,  # Keep last 5 files
+        "rotation_mb": 10,  # Rotate after 10 MB (legacy)
+        "rotation": None,  # Advanced rotation: str|int|timedelta|callable
+        "retention_files": 5,  # Keep last 5 files (legacy)
+        "retention": None,  # Advanced retention: str|int|timedelta|callable
         "level": "INFO",
         "json": True,  # Use JSON format
+        "serialize": False,  # Serialize full record as JSON
         "stdout": True,  # Emit to stdout
-        "compression": "none",  # Options: "zip", "gz", "none"
+        "compression": "none",  # Options: "zip", "gz", "bz2", "none"
         "add_runtime_context": True,  # Add platform/runtime metadata
         "enqueue": False,  # Use background queue for sinks
+        "catch": True,  # Catch handler errors
+        "filter": None,  # Filter callback
+        "formatter": None,  # Formatter callback
+        "format": None,  # Text format string
         # Security settings
         "sanitize_messages": True,  # Prevent log injection attacks
         "mask_pii": False,  # Mask sensitive data (PII)
@@ -33,7 +40,7 @@ class LakeTraceConfig:
     }
     
     VALID_LEVELS = {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}
-    VALID_COMPRESSIONS = {"zip", "gz", "none"}
+    VALID_COMPRESSIONS = {"zip", "gz", "bz2", "none"}
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
@@ -59,7 +66,7 @@ class LakeTraceConfig:
         self._config["level"] = level
         
         # Validate compression
-        compression = str(self._config["compression"]).lower()
+        compression = str(self._config["compression"]).lower() if self._config["compression"] is not None else "none"
         if compression not in self.VALID_COMPRESSIONS:
             raise ValueError(
                 f"Invalid compression '{compression}'. Must be one of {self.VALID_COMPRESSIONS}"
@@ -67,10 +74,10 @@ class LakeTraceConfig:
         self._config["compression"] = compression
         
         # Validate numeric values
-        if self._config["rotation_mb"] <= 0:
+        if self._config["rotation_mb"] is not None and self._config["rotation_mb"] <= 0:
             raise ValueError("rotation_mb must be positive")
         
-        if self._config["retention_files"] <= 0:
+        if self._config["retention_files"] is not None and self._config["retention_files"] <= 0:
             raise ValueError("retention_files must be positive")
         
         # Ensure log_dir is string
@@ -101,11 +108,21 @@ class LakeTraceConfig:
     def rotation_mb(self) -> int:
         """Get rotation size in MB."""
         return self._config["rotation_mb"]
+
+    @property
+    def rotation(self) -> Any:
+        """Get advanced rotation configuration."""
+        return self._config["rotation"]
     
     @property
     def retention_files(self) -> int:
         """Get number of files to retain."""
         return self._config["retention_files"]
+
+    @property
+    def retention(self) -> Any:
+        """Get advanced retention configuration."""
+        return self._config["retention"]
     
     @property
     def level(self) -> str:
@@ -116,6 +133,11 @@ class LakeTraceConfig:
     def json(self) -> bool:
         """Check if JSON format is enabled."""
         return self._config["json"]
+
+    @property
+    def serialize(self) -> bool:
+        """Check if JSON serialization is enabled."""
+        return self._config["serialize"]
     
     @property
     def stdout(self) -> bool:
@@ -136,6 +158,26 @@ class LakeTraceConfig:
     def enqueue(self) -> bool:
         """Check if sinks should use enqueue."""
         return self._config["enqueue"]
+
+    @property
+    def catch(self) -> bool:
+        """Check if handler errors should be caught."""
+        return self._config["catch"]
+
+    @property
+    def filter(self) -> Any:
+        """Get filter callback."""
+        return self._config["filter"]
+
+    @property
+    def formatter(self) -> Any:
+        """Get formatter callback."""
+        return self._config["formatter"]
+
+    @property
+    def format(self) -> Optional[str]:
+        """Get format string for text formatter."""
+        return self._config["format"]
 
     @property
     def sanitize_messages(self) -> bool:
