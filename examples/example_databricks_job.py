@@ -4,7 +4,7 @@ Example 3: Databricks Job
 This example demonstrates how to use LakeTrace in a Databricks job environment.
 """
 
-from laketrace import get_laketrace_logger, stop_spark_if_active
+from laketrace import get_logger, stop_spark_if_active
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, when, current_timestamp
 import sys
@@ -20,7 +20,7 @@ def run_databricks_etl():
     """
     
     # Initialize logger - automatically detects Databricks environment
-    logger = get_laketrace_logger(
+    logger = get_logger(
         "databricks_customer_360_pipeline",
         config={
             "level": "INFO",

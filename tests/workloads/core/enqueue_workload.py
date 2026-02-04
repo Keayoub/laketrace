@@ -13,8 +13,10 @@ import sys
 import tempfile
 import time
 import threading
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
 
 from laketrace import get_logger
 from laketrace.core_logger import FileHandler, StreamHandler

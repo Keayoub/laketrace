@@ -14,8 +14,10 @@ import tempfile
 import gzip
 import bz2
 import zipfile
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
 
 from laketrace import get_logger
 from laketrace.compression import make_compression_function

@@ -1,5 +1,9 @@
-"""Minimal test to find blocking point."""
+"""Test with stdout only (no file handler)."""
 import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
 
 print("1. Starting test...")
 
@@ -8,8 +12,14 @@ try:
     from laketrace import get_logger
     print("3. Import successful")
     
-    print("4. Creating logger...")
-    log = get_logger("test")
+    print("4. Creating logger with stdout only...")
+    log = get_logger(
+        "test",
+        config={
+            "log_dir": None,  # No file handler
+            "stdout": True,
+        }
+    )
     print("5. Logger created!")
     
     print("6. Logging message...")

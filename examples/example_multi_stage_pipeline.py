@@ -5,7 +5,7 @@ This example demonstrates advanced usage of LakeTrace with multiple stages,
 hierarchical context binding, and comprehensive error handling.
 """
 
-from laketrace import get_laketrace_logger
+from laketrace import get_logger
 from datetime import datetime, timedelta
 from typing import Dict, Any
 import random
@@ -24,7 +24,7 @@ class DataPipeline:
             run_date: Date for this pipeline run (YYYY-MM-DD)
         """
         # Create base logger with pipeline context
-        self.base_logger = get_laketrace_logger(
+        self.base_logger = get_logger(
             pipeline_name,
             config={
                 "level": "DEBUG",

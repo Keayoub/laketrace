@@ -1,8 +1,6 @@
 """
 Rotation helpers for LakeTrace.
 
-Adapted from Loguru (MIT License): https://github.com/Delgan/loguru
-Original author: Julien Danjou
 """
 
 import datetime

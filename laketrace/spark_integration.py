@@ -11,12 +11,12 @@ where you want all logs (app + Spark) in a single lakehouse file.
 import logging
 from typing import Optional, Any
 
-from laketrace.logger import LakeTraceLogger, get_laketrace_logger
+from laketrace.logger import Logger, get_logger
 
 
 class SparkLogHandler(logging.Handler):
     """
-    Custom logging handler that redirects Python/Spark logs to Loguru via LakeTrace.
+    Custom logging handler that redirects Python/Spark logs to LakeTrace.
 
     This handler captures all logs from the Spark framework (org.apache.spark)
     and routes them to the LakeTrace logger, allowing unified logging output.
@@ -32,7 +32,7 @@ class SparkLogHandler(logging.Handler):
 
     def emit(self, record: logging.LogRecord) -> None:
         """
-        Emit a log record by routing it to Loguru.
+        Emit a log record by routing it to LakeTrace.
 
         Args:
             record: LogRecord from Python logging system
@@ -44,7 +44,7 @@ class SparkLogHandler(logging.Handler):
             # Format the message
             message = self.format(record)
             
-            # Route to Loguru via LakeTrace logger
+            # Route to LakeTrace logger
             log_method = getattr(self.logger._logger, level, self.logger._logger.info)
             log_method(message)
         except Exception:
@@ -98,7 +98,7 @@ def setup_logging_with_spark(
         - In Local Development: Captures application logs only (no Spark)
     """
     # Create LakeTrace logger with optional config
-    app_logger = get_laketrace_logger(app_name, config=config)
+    app_logger = get_logger(app_name, config=config)
 
     # Setup Spark log redirection if requested
     if capture_spark_logs:

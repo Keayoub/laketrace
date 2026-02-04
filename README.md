@@ -4,832 +4,150 @@
 
 LakeTrace is a cross-platform Python logging module designed specifically for Spark data platforms. It provides safe, performant logging with structured output, local file rotation, and optional lakehouse storage integration.
 
-## ✨ Key Features
-
-- **Cross-Platform Compatibility**: Works identically in Microsoft Fabric Notebooks, Fabric Spark Job Definitions, and Databricks notebooks/jobs
-- **Safe Spark Integration**: Driver-only pattern with no remote file appends during logging
-- **Structured JSON Logging**: Rich context with runtime metadata, bound fields, and timestamps
-- **Local File Rotation**: Automatic log rotation by size with configurable retention
-- **Stdout Emission**: Logs appear in job output for easy debugging
-- **Optional Lakehouse Upload**: End-of-run upload to Fabric/Databricks lakehouse storage
-- **Thread-Safe**: Safe for concurrent operations
-- **Notebook Re-execution Safe**: No duplicate handlers on cell re-runs
-
-## 🚀 Quick Start
-
-### Installation
+## Installation
 
 ```bash
 pip install laketrace
 ```
 
-### Basic Usage
+## ✅ Why LakeTrace (vs SparkLogger)
+
+LakeTrace is built for Spark data platforms and removes the common failure modes of basic Spark logging:
+
+- **Driver-safe**: no executor logging, no distributed file writes.
+- **No remote appends**: all logging stays local with rotation and retention.
+- **Structured JSON**: consistent records with runtime metadata and bound context.
+- **Fabric + Databricks aware**: platform detection built in.
+- **Crash‑safe logging**: optional `catch` prevents formatter errors from breaking jobs.
+- **Scalable I/O**: enqueue mode for high-throughput workloads.
+
+## ✨ Key Features
+
+- Cross‑platform: Fabric notebooks, Fabric Spark jobs, Databricks notebooks/jobs
+- Structured JSON with context binding and runtime metadata
+- Local rotation, retention, and compression
+- Stdout emission for job logs
+- Optional end‑of‑run lakehouse upload
+- Thread‑safe and notebook re‑execution safe
+
+## 🚀 Quick Start
 
 ```python
-from laketrace import get_laketrace_logger
+from laketrace import get_logger
 
-# Create logger
-logger = get_laketrace_logger("my_job")
-
-# Log messages
+logger = get_logger("my_job")
 logger.info("Starting data processing")
-logger.warning("High memory usage detected")
-logger.error("Failed to connect to database")
 
-# Bind context for structured logging
-stage_logger = logger.bind(stage="extract", dataset="sales")
-stage_logger.info("Extracting sales data")  # Includes stage and dataset fields
+stage = logger.bind(stage="extract", dataset="sales")
+stage.info("Extracting sales data")
 
-# Upload logs at end of job (optional)
 logger.upload_log_to_lakehouse("Files/logs/my_job.log")
 ```
 
-## 📋 Usage Examples
-
-### Example 1: Microsoft Fabric Notebook
+## ⚙️ Configuration Highlights
 
 ```python
-from laketrace import get_laketrace_logger
-
-# Initialize logger
-logger = get_laketrace_logger("fabric_notebook")
-
-# Log with context
-logger.info("Notebook started", user="data_engineer")
-
-# Bind stage context
-extract_logger = logger.bind(stage="extract", source="sales_db")
-extract_logger.info("Starting data extraction")
-
-# Process data...
-try:
-    # Your code here
-    extract_logger.success("Extraction completed successfully")
-except Exception as e:
-    extract_logger.exception("Extraction failed")
-
-# View recent logs (useful in notebook)
-logger.tail(20)
-
-# Upload to lakehouse at end
-logger.upload_log_to_lakehouse("Files/logs/notebook_run.log")
-```
-
-### Example 2: Fabric Spark Job Definition
-
-```python
-from laketrace import get_laketrace_logger, stop_spark_if_active
-from pyspark.sql import SparkSession
-
-def main():
-    # Initialize logger with custom config
-    logger = get_laketrace_logger(
-        "fabric_spark_job",
-        config={
-            "log_dir": "/tmp/fabric_logs",
-            "rotation_mb": 20,
-            "retention_files": 10,
-            "level": "DEBUG",
-        }
-    )
-    
-    logger.info("Spark job started")
-    
-    try:
-        # Create Spark session
-        spark = SparkSession.builder.appName("MyJob").getOrCreate()
-        
-        # Bind job context
-        job_logger = logger.bind(job_type="etl", version="1.2.3")
-        
-        # Process data
-        job_logger.info("Reading source data")
-        df = spark.read.parquet("Files/raw/sales")
-        
-        job_logger.info(f"Processing {df.count()} records")
-        # ... transformation logic ...
-        
-        job_logger.success("Job completed successfully")
-        
-    except Exception as e:
-        logger.exception("Job failed")
-        raise
-    
-    finally:
-        # Upload logs
-        logger.upload_log_to_lakehouse("Files/logs/spark_job.log")
-        
-        # Stop Spark
-        stop_spark_if_active()
-
-if __name__ == "__main__":
-    main()
-```
-
-### Example 3: Databricks Job
-
-```python
-from laketrace import get_laketrace_logger, stop_spark_if_active
-from pyspark.sql import SparkSession
-
-def run_databricks_job():
-    # Logger automatically detects Databricks environment
-    logger = get_laketrace_logger("databricks_etl")
-    
-    logger.info("Databricks job initialized")
-    
-    spark = SparkSession.builder.getOrCreate()
-    
-    # Bind pipeline context
-    pipeline_logger = logger.bind(
-        pipeline="customer_360",
-        stage="bronze_to_silver"
-    )
-    
-    try:
-        # Read from bronze
-        pipeline_logger.info("Reading bronze layer")
-        bronze_df = spark.read.table("bronze.customers")
-        
-        # Transform
-        pipeline_logger.info("Applying transformations")
-        silver_df = bronze_df.filter("is_active = true")
-        
-        # Write to silver
-        pipeline_logger.info("Writing to silver layer")
-        silver_df.write.mode("overwrite").saveAsTable("silver.customers")
-        
-        pipeline_logger.success("Pipeline completed successfully")
-        
-    except Exception as e:
-        pipeline_logger.exception("Pipeline failed")
-        raise
-    
-    finally:
-        # Upload to DBFS
-        logger.upload_log_to_lakehouse("dbfs:/logs/customer_360.log")
-        stop_spark_if_active()
-
-if __name__ == "__main__":
-    run_databricks_job()
-```
-
-### Example 4: Spark Driver with Bound Context
-
-```python
-from laketrace import get_laketrace_logger
-from datetime import datetime
-
-# Create base logger
-base_logger = get_laketrace_logger(
-    "multi_stage_pipeline",
-    config={"level": "INFO", "json": True}
-)
-
-# Track pipeline metadata
-run_date = datetime.now().strftime("%Y-%m-%d")
-base_logger = base_logger.bind(run_date=run_date, environment="production")
-
-# Stage 1: Extract
-extract_logger = base_logger.bind(stage="extract")
-extract_logger.info("Starting extraction")
-# ... extraction logic ...
-extract_logger.success("Extraction complete", records=10000)
-
-# Stage 2: Transform
-transform_logger = base_logger.bind(stage="transform")
-transform_logger.info("Starting transformation")
-# ... transformation logic ...
-transform_logger.success("Transformation complete", records=9500)
-
-# Stage 3: Load
-load_logger = base_logger.bind(stage="load")
-load_logger.info("Starting load")
-# ... load logic ...
-load_logger.success("Load complete", records=9500)
-
-# Final summary
-base_logger.info("Pipeline completed", total_runtime_seconds=125)
-
-# Upload consolidated log
-base_logger.upload_log_to_lakehouse("Files/logs/pipeline.log")
-```
-
-### Example 5: Unified Spark Framework + Application Logging (RECOMMENDED)
-
-**Capture BOTH Spark framework logs AND your application logs in the same file:**
-
-```python
-from pyspark.sql import SparkSession
-from laketrace import setup_logging_with_spark, stop_spark_and_upload_logs
-
-# Initialize Spark
-spark = SparkSession.builder.appName("UnifiedETL").getOrCreate()
-
-# Setup unified logging (automatically redirects Spark logs to LakeTrace)
-logger = setup_logging_with_spark(
-    app_name="unified_etl",
-    spark_session=spark,
-    config={"level": "INFO", "json": True},
-    capture_spark_logs=True,  # Enable Spark log redirection
-)
-
-try:
-    logger.info("Starting ETL")
-    
-    # Spark framework logs are automatically captured
-    df = spark.read.parquet("Files/raw/sales")
-    logger.info(f"Loaded {df.count()} records")
-    
-    # Your application logs
-    df_clean = df.filter("is_active = true")
-    logger.info("Data cleaned", records_after=df_clean.count())
-    
-    df_clean.write.parquet("Files/output/sales")
-    logger.success("ETL completed")
-    
-finally:
-    # Cleanup and upload logs
-    stop_spark_and_upload_logs(
-        logger,
-        target_path="Files/logs/unified_etl.log",
-        spark_session=spark
-    )
-```
-
-**Output file contains BOTH:**
-```json
-{"timestamp": "...", "level": "INFO", "message": "Starting ETL"}
-{"timestamp": "...", "level": "INFO", "message": "DAGScheduler: Job 0 finished"}
-{"timestamp": "...", "level": "INFO", "message": "Loaded 50000 records"}
-{"timestamp": "...", "level": "INFO", "message": "TaskSchedulerImpl: Task 0 finished"}
-{"timestamp": "...", "level": "INFO", "message": "Data cleaned", "records_after": 49500}
-{"timestamp": "...", "level": "SUCCESS", "message": "ETL completed"}
-```
-
-✅ **All logs in one place!**
-
-## 🧵 Microsoft Fabric Specific Guidance
-
-### Fabric Notebook Usage
-
-Use LakeTrace in the notebook driver process and keep logging simple and light:
-
-- Use `get_laketrace_logger()` once per notebook.
-- Use `logger.tail()` for quick inspection during interactive work.
-- Upload logs at the end with `upload_log_to_lakehouse()`.
-
-Example pattern:
-
-```python
-from laketrace import get_laketrace_logger
-
-logger = get_laketrace_logger("fabric_notebook")
-logger.info("Notebook started")
-
-# ... work ...
-
-logger.tail(20)
-logger.upload_log_to_lakehouse("Files/logs/notebook_run.log")
-```
-
-### Fabric Spark Job Definitions
-
-In Spark jobs, keep logging on the driver only and use end-of-run upload:
-
-- Call `stop_spark_if_active()` in `finally`.
-- Use a stable log path under `Files/` so it lands in the Lakehouse.
-- Avoid logging from executors (use `print()` there).
-
-Example pattern with unified logging:
-
-```python
-from pyspark.sql import SparkSession
-from laketrace import setup_logging_with_spark, stop_spark_and_upload_logs
-
-def main():
-    spark = SparkSession.builder.appName("FabricJob").getOrCreate()
-    
-    # Setup unified logging for Spark + app
-    logger = setup_logging_with_spark(
-        app_name="fabric_job",
-        spark_session=spark,
-        capture_spark_logs=True
-    )
-    
-    try:
-        logger.info("Job started")
-        # Spark + app logs both captured
-        df = spark.read.parquet("Files/raw/data")
-        logger.info(f"Processed {df.count()} records")
-    finally:
-        stop_spark_and_upload_logs(
-            logger,
-            "Files/logs/fabric_job.log",
-            spark
-        )
-
-if __name__ == "__main__":
-    main()
-```
-
-```python
-from laketrace import get_laketrace_logger, stop_spark_if_active
-
-logger = get_laketrace_logger("fabric_job")
-
-try:
-    # Spark work on driver
-    logger.info("Job started")
-    # ... work ...
-finally:
-    logger.upload_log_to_lakehouse("Files/logs/fabric_job.log")
-    stop_spark_if_active()
-```
-
-## ⚡ High Concurrency Mode Tuning (Fabric)
-
-High Concurrency Mode shares a single Spark session across notebooks. LakeTrace is safe for this mode when used on the driver. For best performance and lower contention:
-
-- Keep logging **driver-only**; avoid executor logging.
-- Use `INFO` or `WARNING` for busy notebooks.
-- Consider `stdout=False` if job output becomes noisy.
-- Keep `enqueue=False` (default) to avoid background queue overhead in shared sessions.
-
-Recommended config for busy concurrent notebooks:
-
-```python
-logger = get_laketrace_logger(
-    "fabric_concurrent",
+logger = get_logger(
+    "my_job",
     config={
+        "log_dir": "/tmp/laketrace_logs",
+        "rotation": "500 MB",
+        "retention": "7 days",
+        "compression": "gz",
         "level": "INFO",
-        "stdout": False,
+        "json": True,
+        "stdout": True,
+        "serialize": True,
         "enqueue": False,
-        "rotation_mb": 20,
-        "retention_files": 10,
+        "filter": None,
+        "formatter": None,
+        "catch": True,
     }
 )
 ```
 
-## ⚙️ Configuration
+## 🔄 Migration Guides
 
-Configure the logger by passing a configuration dictionary:
+### From SparkLogger
 
-```python
-logger = get_laketrace_logger(
-    "my_job",
-    config={
-        "log_dir": "/custom/log/path",      # Log directory (default: /tmp/laketrace_logs)
-        "rotation_mb": 20,                   # Rotate after 20 MB (default: 10)
-        "retention_files": 10,               # Keep 10 files (default: 5)
-        "level": "DEBUG",                    # Log level (default: INFO)
-        "json": True,                        # JSON format (default: True)
-        "stdout": True,                      # Emit to stdout (default: True)
-        "compression": "gz",                 # Compression: gz, zip, none (default: none)
-        "add_runtime_context": True,         # Add platform metadata (default: True)
-    }
-)
-```
+SparkLogger often leads to executor logging overhead and cross-partition serialization issues. LakeTrace moves all logging to the driver:
 
-## 🏗️ Architecture
-
-### Design Principles
-
-1. **Driver-Only Logging**: LakeTrace is designed for Spark driver processes only. Never use it in executor functions (UDFs, map operations, etc.)
-2. **No Remote Appends**: All logging is done to local files with rotation. No remote file system writes during log operations
-3. **Bounded Retries**: Upload operations have a maximum retry count (default: 2) to prevent infinite loops
-4. **Graceful Degradation**: Logging failures never crash your application
-
-### Runtime Detection
-
-LakeTrace automatically detects the execution environment:
-
-- **Microsoft Fabric**: Detected via `notebookutils` module or Fabric environment variables
-- **Databricks**: Detected via `dbutils` or `DATABRICKS_RUNTIME_VERSION` environment variable
-- **Generic Spark**: Detected via active `SparkSession`
-- **Local**: Default fallback for local development
-
-### Log Format
-
-**JSON Format** (default):
-```json
-{
-  "timestamp": "2024-01-15T10:30:45.123456+00:00",
-  "level": "INFO",
-  "message": "Processing sales data",
-  "logger_name": "my_job",
-  "hostname": "spark-driver-01",
-  "pid": 12345,
-  "platform": "fabric",
-  "runtime_type": "fabric",
-  "run_id": "abc-123",
-  "stage": "extract",
-  "dataset": "sales"
-}
-```
-
-**Text Format**:
-```
-2024-01-15 10:30:45 | INFO     | my_job [run_id=abc-123, stage=extract] | Processing sales data
-```
-
-## 🔧 API Reference
-
-### `get_laketrace_logger(name, config=None, run_id=None)`
-
-Factory function to get or create a logger instance.
-
-**Parameters:**
-- `name` (str): Logger name
-- `config` (dict, optional): Configuration dictionary
-- `run_id` (str, optional): Run identifier for correlation
-
-**Returns:** `LakeTraceLogger` instance
-
-### `LakeTraceLogger`
-
-Main logger class with the following methods:
-
-#### Logging Methods
-- `trace(message, **kwargs)`: Log trace-level message
-- `debug(message, **kwargs)`: Log debug-level message
-- `info(message, **kwargs)`: Log info-level message
-- `success(message, **kwargs)`: Log success-level message
-- `warning(message, **kwargs)`: Log warning-level message
-- `error(message, **kwargs)`: Log error-level message
-- `critical(message, **kwargs)`: Log critical-level message
-- `exception(message, **kwargs)`: Log exception with traceback
-
-#### Context Methods
-- `bind(**kwargs)`: Create new logger with bound context fields
-
-#### Utility Methods
-- `tail(n=50)`: Print last N lines from log file
-- `upload_log_to_lakehouse(target_path, max_retries=2)`: Upload log to lakehouse storage
-
-### `RuntimeDetector`
-
-Utility class for environment detection:
-
-- `detect_platform()`: Returns `RuntimePlatform` enum
-- `get_runtime_metadata()`: Returns runtime metadata dictionary
-
-### `stop_spark_if_active()`
-
-Safely stops active SparkSession if present.
-
-## 🎯 Advanced Features (Phase 2)
-
-### Custom Filters
-
-Control which messages get logged using custom filter functions:
+**Before (SparkLogger):**
 
 ```python
-# Only log errors to file, everything to stdout
-logger = get_logger("app", config={
-    "filter": lambda record: record.level in ("ERROR", "CRITICAL"),
-    "log_dir": "/tmp/errors_only"
-})
+from pyspark.taskcontext import TaskContext
+from delta.tables import DeltaTable
 
-logger.info("Goes to stdout only")
-logger.error("Goes to both stdout and file")
+# Problem: Executors attempt to log, causing distributed serialization
+for partition in range(num_partitions):
+    df.filter(...).collect()  # Executor logs serialized back to driver
 ```
 
-Available record attributes for filtering:
-- `level`: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-- `message`: Log message text
-- `logger_name`: Logger name
-- `pid`: Process ID
-- `hostname`: Hostname
-
-### Custom Formatters
-
-Transform log records with custom formatting functions:
+**After (LakeTrace):**
 
 ```python
-# Add custom prefix to all messages
-logger = get_logger("app", config={
-    "formatter": lambda record: f"[{record.level}] {record.message}\n"
-})
+from laketrace import get_logger
+
+logger = get_logger("my_job")  # Driver only
+
+# Log from driver, use print() in executors
+df = spark.read.parquet(path)
+logger.info(f"Loaded {df.count()} rows")  # Clean, structured, driver-safe
 ```
 
-### Serialization Mode
+### From notebookutils.fs.append
 
-Output complete record metadata as JSON (includes bound context):
+Using `notebookutils.fs.append()` for logging causes performance degradation and can hang Spark jobs due to repeated remote I/O per log line. LakeTrace uses local rotation instead:
+
+**Before (notebookutils.fs.append):**
 
 ```python
-logger = get_logger("api", config={
-    "serialize": True,  # Full record JSON
-})
+from notebookutils.mssparkutils import fs
 
-# Bind context
-bound = logger.bind(request_id="req-123", user_id=42)
-bound.info("Request received")
-
-# Output includes all metadata:
-# {
-#   "timestamp": "2024-01-15T10:30:45.123456+00:00",
-#   "level": "INFO",
-#   "message": "Request received",
-#   "logger_name": "api",
-#   "request_id": "req-123",
-#   "user_id": 42,
-#   "pid": 12345,
-#   "platform": "fabric",
-#   ...
-# }
+# Problem: Each log line triggers remote I/O → job hangs
+for i in range(1000):
+    fs.append("/mnt/logs/job.log", f"Processing {i}\n")  # Remote write per line
+    process_data(i)
 ```
 
-### Error Catching
-
-Prevent logging errors from crashing your application:
+**After (LakeTrace):**
 
 ```python
-logger = get_logger("app", config={
-    "catch": True  # Errors in formatters won't crash
-})
+from laketrace import get_logger
+
+logger = get_logger("my_job")
+
+# Local rotation, zero remote I/O during execution
+for i in range(1000):
+    logger.info(f"Processing {i}")  # Fast local write, no hangs
+    process_data(i)
+
+# Upload once at the end
+logger.upload_log_to_lakehouse("/Files/logs/job.log")
 ```
 
-### Multiple Handlers
+## 🧪 Workload Test Runner
 
-Add different handlers with independent filtering and formatting:
+Run the consolidated workload tests:
 
-```python
-logger = get_logger("app")
-
-# Error handler (errors only)
-error_id = logger.add_handler({
-    "sink": "/tmp/errors.log",
-    "filter": lambda r: r.level in ("ERROR", "CRITICAL"),
-    "json": True
-})
-
-# Debug handler (everything)
-debug_id = logger.add_handler({
-    "sink": "/tmp/debug.log",
-    "level": "DEBUG"
-})
-
-logger.info("Info message")     # Only in debug.log
-logger.error("Error message")   # In both files
-
-# Remove specific handler
-logger.remove_handler(error_id)
+```bash
+python tests/run_workloads.py
 ```
 
-## 📈 Performance & Reliability (Phase 3)
+Workload groups live under:
 
-### Benchmarks
+- [tests/workloads/basic](tests/workloads/basic)
+- [tests/workloads/core](tests/workloads/core)
+- [tests/workloads/advanced](tests/workloads/advanced)
+- [tests/workloads/performance](tests/workloads/performance)
+- [tests/workloads/security](tests/workloads/security)
 
-Tested on production workloads:
+## ✅ Safety Notes
 
-| Metric | Value |
-|--------|-------|
-| **Throughput** | 4,300+ messages/sec |
-| **Latency** | <1ms per message (async) |
-| **Memory** | ~50KB per logger instance |
-| **Rotation Overhead** | <2% |
-| **Thread Safety** | 5+ concurrent threads |
-| **Large Messages** | 1 MB+ supported |
-
-### Memory Efficiency
-
-LakeTrace is designed for memory-constrained environments:
-
-```python
-# Create 100 logger instances safely
-loggers = {
-    f"worker_{i}": get_logger(f"worker_{i}")
-    for i in range(100)
-}
-# Total memory: ~5 MB (50 KB per logger)
-
-# Clean up
-for logger in loggers.values():
-    logger.close()
-```
-
-### Concurrent Logging
-
-Thread-safe logging across multiple threads:
-
-```python
-import threading
-
-logger = get_logger("app")
-
-def worker(worker_id):
-    bound = logger.bind(worker=worker_id)
-    for i in range(100):
-        bound.info(f"Work item {i}")
-
-threads = [
-    threading.Thread(target=worker, args=(i,))
-    for i in range(5)
-]
-
-for t in threads:
-    t.start()
-for t in threads:
-    t.join()
-
-# All logs are safely written to file
-```
-
-### Rotation & Retention at Scale
-
-Automatic cleanup prevents disk filling:
-
-```python
-logger = get_logger("app", config={
-    "rotation": "500 MB",        # Rotate every 500 MB
-    "rotation_backups": 5,       # Keep 5 backup files
-    "retention": "7 days",       # Delete files older than 7 days
-    "compression": "gzip"        # Compress rotated files
-})
-
-# With these settings:
-# - Old files are automatically deleted
-# - Compressed files take ~10% of original size
-# - Disk usage is bounded and predictable
-```
-
-## ⚠️ Important Notes
-
-### Security Best Practices
-
-LakeTrace includes built-in security features to protect your logs:
-
-#### 1. **Message Sanitization** (Enabled by default)
-
-Prevents log injection attacks by escaping newlines and carriage returns:
-
-```python
-from laketrace import sanitize_message
-
-# Sanitize user input before logging
-user_input = "Admin\nINFO Fake entry"
-safe_input = sanitize_message(user_input)
-logger.info(f"User action: {safe_input}")
-# Output: "User action: Admin\nINFO Fake entry" (newline escaped)
-```
-
-To disable sanitization (not recommended):
-
-```python
-logger = get_laketrace_logger(
-    "my_job",
-    config={"sanitize_messages": False}
-)
-```
-
-#### 2. **File Permissions** (Enabled by default)
-
-Log files are created with `0o600` permissions (owner read/write only):
-
-```python
-logger = get_laketrace_logger(
-    "my_job",
-    config={"secure_file_permissions": True}  # Default
-)
-# Log file: -rw------- (only owner can read)
-```
-
-To use default permissions instead:
-
-```python
-logger = get_laketrace_logger(
-    "my_job",
-    config={"secure_file_permissions": False}
-)
-# Log file: -rw-r--r-- (world readable)
-```
-
-#### 3. **PII Masking** (Disabled by default)
-
-Optional masking of sensitive data (emails, passwords, tokens, etc.):
-
-```python
-from laketrace import mask_pii
-
-logger = get_laketrace_logger(
-    "my_job",
-    config={"mask_pii": True}  # Enable PII masking
-)
-
-# Log structured data with automatic masking
-logger.log_structured(
-    "User authentication",
-    level="INFO",
-    data={
-        "user": "john@example.com",
-        "password": "secret123",
-        "api_key": "sk-1234567890",
-    },
-    mask_sensitive=True
-)
-# Output: Sensitive fields replaced with "***"
-```
-
-Custom PII patterns:
-
-```python
-from laketrace import SecurityConfig, mask_pii
-
-config = SecurityConfig(
-    enable_pii_masking=True,
-    pii_patterns={
-        "custom_field": r"CUSTOM_\d{8}",
-        "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
-    }
-)
-
-data = {"custom_field": "CUSTOM_12345678", "email": "user@example.com"}
-masked = mask_pii(data, config)
-# Result: {"custom_field": "***", "email": "***"}
-```
-
-#### 4. **String Format Protection**
-
-Prevent format string exploits with `escape_format_strings()`:
-
-```python
-from laketrace import escape_format_strings
-
-user_input = "Hello {value.__class__}"
-safe = escape_format_strings(user_input)
-logger.info(safe)  # Braces escaped, prevents introspection
-```
-
-### Security Configuration Summary
-
-```python
-logger = get_laketrace_logger(
-    "secure_job",
-    config={
-        "sanitize_messages": True,           # Escape newlines (default: True)
-        "mask_pii": False,                   # Mask sensitive data (default: False)
-        "secure_file_permissions": True,     # Use 0o600 permissions (default: True)
-    }
-)
-```
-
-### Spark Executor Warning
-
-**DO NOT use LakeTrace in Spark executors (UDFs, map functions, etc.)**
-
-```python
-# ❌ WRONG - Don't do this
-def my_udf(value):
-    logger = get_laketrace_logger("executor")  # Will cause issues!
-    logger.info(f"Processing {value}")
-    return value.upper()
-
-# ✅ CORRECT - Use print() in executors
-def my_udf(value):
-    print(f"Processing {value}")  # Safe for executors
-    return value.upper()
-```
-
-### Lakehouse Upload Pattern
-
-The `upload_log_to_lakehouse()` method should be called **once at the end of your job**:
-
-```python
-# ✅ CORRECT - Single upload at end
-logger.info("Step 1 complete")
-logger.info("Step 2 complete")
-logger.upload_log_to_lakehouse("Files/logs/job.log")  # Called once
-
-# ❌ WRONG - Don't upload repeatedly
-logger.info("Step 1 complete")
-logger.upload_log_to_lakehouse("Files/logs/job.log")  # Too frequent!
-logger.info("Step 2 complete")
-logger.upload_log_to_lakehouse("Files/logs/job.log")  # Too frequent!
-```
-
-## 📊 Platform-Specific Features
-
-### Microsoft Fabric
-- Uses `notebookutils.fs.put()` for lakehouse upload
-- Detects workspace and lakehouse IDs automatically
-- Works in both notebooks and Spark job definitions
-
-### Databricks
-- Uses `dbutils.fs.put()` for DBFS upload
-- Detects cluster, job, and run IDs automatically
-- Supports both interactive and scheduled jobs
+- **Driver only**: use `print()` in executors.
+- **Single upload**: call `upload_log_to_lakehouse()` once at the end.
+- **No remote append**: avoids Spark job hangs and retries.
 
 ## 📝 License
 
-MIT License - see LICENSE file for details
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit issues or pull requests.
-
-## 📚 Additional Resources
-
-- [Microsoft Fabric Documentation](https://learn.microsoft.com/fabric/)
-- [Databricks Documentation](https://docs.databricks.com/)
-- [Loguru Documentation](https://loguru.readthedocs.io/)
+MIT License - see LICENSE file for details.

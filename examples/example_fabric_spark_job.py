@@ -5,7 +5,7 @@ This example demonstrates how to use LakeTrace in a Fabric Spark Job Definition.
 This is the main.py file for a Fabric Spark job.
 """
 
-from laketrace import get_laketrace_logger, stop_spark_if_active
+from laketrace import get_logger, stop_spark_if_active
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, sum as _sum
 import sys
@@ -15,7 +15,7 @@ def main():
     """Main entry point for Fabric Spark job."""
     
     # Initialize logger with custom configuration
-    logger = get_laketrace_logger(
+    logger = get_logger(
         "fabric_spark_etl_job",
         config={
             "log_dir": "/tmp/fabric_spark_logs",

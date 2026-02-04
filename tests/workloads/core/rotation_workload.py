@@ -13,9 +13,10 @@ import sys
 import tempfile
 import time
 from datetime import datetime, timedelta, time as time_obj
+from pathlib import Path
 
-# Add parent to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
 
 from laketrace import get_logger
 from laketrace.rotation import Rotation, make_rotation_function

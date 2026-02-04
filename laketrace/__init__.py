@@ -8,7 +8,7 @@ Zero external dependencies - uses only Python stdlib.
 
 Key Features:
 - Works identically in Fabric Notebooks, Fabric Spark Jobs, and Databricks
-- Vendored logging engine (no Loguru dependency)
+- Vendored logging engine with no external dependencies
 - Safe local file rotation with size-based limits
 - Structured JSON output with runtime context
 - Stdout emission for job output visibility
@@ -18,17 +18,13 @@ Key Features:
 
 Recommended Import Patterns:
     ```python
-    # Safe: No name conflicts
+    # Preferred: get_logger function
     from laketrace import get_logger
     log = get_logger("my_job")
     
     # Alternative: Direct class usage
     from laketrace import Logger
     log = Logger("my_job")
-    
-    # With alias to avoid conflicts
-    from laketrace import get_logger as trace_logger
-    log = trace_logger("my_job")
     ```
 """
 
@@ -46,7 +42,6 @@ __all__ = [
     # Core API
     "Logger",
     "get_logger",
-    "get_laketrace_logger",
     "create_logger",
     # Runtime utilities
     "detect_runtime",
@@ -57,7 +52,4 @@ __all__ = [
     "escape_newlines",
     "escape_format_strings",
 ]
-
-# Backward-compatible alias
-get_laketrace_logger = get_logger
 

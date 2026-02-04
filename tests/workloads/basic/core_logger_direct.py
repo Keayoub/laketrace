@@ -1,7 +1,12 @@
 """Super simple direct test."""
-from laketrace.core_logger import _CoreLogger, FileHandler, LogLevel
+import sys
 from pathlib import Path
 import tempfile
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
+
+from laketrace.core_logger import _CoreLogger, FileHandler, LogLevel
 
 print("1. Create temp dir...")
 tmpdir = tempfile.mkdtemp()

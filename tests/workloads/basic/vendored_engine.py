@@ -6,11 +6,14 @@ import sys
 import tempfile
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
+
 # Test imports
 try:
     from laketrace import get_logger, Logger, create_logger, detect_runtime
     from laketrace.core_logger import _CoreLogger, LogLevel
-    print("✓ All imports successful (no Loguru dependency)")
+    print("✓ All imports successful (no external dependencies)")
 except ImportError as e:
     print(f"✗ Import failed: {e}")
     sys.exit(1)

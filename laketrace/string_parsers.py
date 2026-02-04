@@ -1,8 +1,5 @@
 """
 Simple parsers for rotation/retention configuration.
-
-Adapted from Loguru (MIT License): https://github.com/Delgan/loguru
-Original author: Julien Danjou
 """
 
 import re

@@ -53,7 +53,7 @@ def get_secure_file_opener():
     """
     Get a file opener function that sets secure permissions (0o600).
 
-    Returns a callable that can be passed to loguru's logger.add() as the opener parameter.
+    Returns a callable that can be passed to logger.add() as the opener parameter.
     This ensures log files are readable/writable by owner only.
 
     Returns:

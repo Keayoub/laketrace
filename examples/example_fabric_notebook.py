@@ -4,10 +4,10 @@ Example 1: Microsoft Fabric Notebook Usage
 This example demonstrates how to use LakeTrace in a Fabric notebook environment.
 """
 
-from laketrace import get_laketrace_logger
+from laketrace import get_logger
 
 # Initialize logger
-logger = get_laketrace_logger("fabric_notebook_demo")
+logger = get_logger("fabric_notebook_demo")
 
 # Basic logging
 logger.info("Notebook execution started")

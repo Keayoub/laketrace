@@ -35,9 +35,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 
-dependencies = [
-    "loguru>=0.7.0",
-]
+dependencies = []
 
 [project.urls]
 Homepage = "https://github.com/yourusername/laketrace-logger"

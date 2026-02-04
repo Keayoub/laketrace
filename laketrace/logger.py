@@ -68,7 +68,7 @@ class Logger:
         stage_log.info("Extracting data")
         ```
     """
-    
+
     def __init__(
         self,
         name: str,
@@ -82,58 +82,58 @@ class Logger:
         self.config = LakeTraceConfig(config or {})
         print(f"[DEBUG] Config created, level={self.config.level}")
         self.run_id = run_id or os.getenv("LAKEHOUSE_CONTEXT_RUN_ID", "")
-        
+
         # Get runtime metadata once
         print(f"[DEBUG] Detecting runtime...")
         self.runtime_metadata = detect_runtime()
         print(f"[DEBUG] Runtime detected: {self.runtime_metadata.platform.value}")
-        
+
         # Track bound context
         self._bound_context: Dict[str, Any] = {}
         self._bound_context["platform"] = self.runtime_metadata.platform.value
         self._bound_context["runtime_type"] = self.runtime_metadata.runtime_type.value
-        
+
         if self.run_id:
             self._bound_context["run_id"] = self.run_id
-        
+
         # Track log file path
         self.log_file_path: Optional[Path] = None
-        
+
         # Get core logger instance
         print(f"[DEBUG] Getting core logger...")
         self._logger = _CoreLogger.get_logger(name)
         print(f"[DEBUG] Setting level to {self.config.level}...")
         self._logger.set_level(self.config.level)
-        
+
         # Reset handlers on notebook re-execution
         print(f"[DEBUG] Removing old handlers...")
         self._logger.remove_handlers()
-        
+
         # Setup logging sinks
         print(f"[DEBUG] Setting up sinks...")
         self._setup_sinks()
         print(f"[DEBUG] Logger initialization complete!")
-    
+
     def _setup_sinks(self) -> None:
         """Setup logging sinks for file and stdout output."""
         # Note: Already protected by _logger_lock in get_logger()
         # Setup file sink
         if self.config.log_dir:
             self._setup_file_sink()
-        
+
         # Setup stdout sink
         if self.config.stdout:
             self._setup_stdout_sink()
-    
+
     def _setup_file_sink(self) -> None:
         """Configure local file sink with rotation and secure permissions."""
         log_dir = Path(self.config.log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Construct log file path
         log_file = log_dir / f"{self.name}.log"
         self.log_file_path = log_file
-        
+
         # Determine formatter
         formatter = self._resolve_formatter(is_json=self.config.json)
 
@@ -163,7 +163,7 @@ class Logger:
         )
 
         self._logger.add_handler(file_handler)
-    
+
     def _setup_stdout_sink(self) -> None:
         """Configure stdout sink for job output visibility."""
         formatter = self._resolve_formatter(is_json=self.config.json)
@@ -188,7 +188,7 @@ class Logger:
             return lambda record: self._format_json(record)
 
         return lambda record: self._format_text(record)
-    
+
     def _format_json(self, record) -> str:
         """Format log record as JSON."""
         log_entry = {
@@ -220,22 +220,22 @@ class Logger:
             }
 
         return json.dumps(log_entry) + "\n"
-    
+
     def _format_text(self, record) -> str:
         """Format log record as human-readable text."""
         timestamp = record.timestamp.strftime("%Y-%m-%d %H:%M:%S")
         level = record.level.name
         message = record.message
-        
+
         # Build context string
         context_parts = []
         for key, value in self._bound_context.items():
             context_parts.append(f"{key}={value}")
-        
+
         context_str = f" [{', '.join(context_parts)}]" if context_parts else ""
-        
+
         return f"{timestamp} | {level:8} | {self.name}{context_str} | {message}\n"
-    
+
     def bind(self, **kwargs: Any) -> "BoundLogger":
         """
         Create a new logger with bound context fields.
@@ -257,50 +257,50 @@ class Logger:
             ```
         """
         return BoundLogger(self._logger, {**self._bound_context, **kwargs})
-    
+
     def trace(self, message: str, **kwargs: Any) -> None:
         """Log trace-level message."""
         extra = {**self._bound_context, **kwargs}
         self._logger._log(LogLevel.TRACE, message, extra=extra or None)
-    
+
     def debug(self, message: str, **kwargs: Any) -> None:
         """Log debug-level message."""
         extra = {**self._bound_context, **kwargs}
         self._logger._log(LogLevel.DEBUG, message, extra=extra or None)
-    
+
     def info(self, message: str, **kwargs: Any) -> None:
         """Log info-level message."""
         if self.config.sanitize_messages:
             message = sanitize_message(message)
         extra = {**self._bound_context, **kwargs}
         self._logger._log(LogLevel.INFO, message, extra=extra or None)
-    
+
     def success(self, message: str, **kwargs: Any) -> None:
         """Log success-level message."""
         if self.config.sanitize_messages:
             message = sanitize_message(message)
         extra = {**self._bound_context, **kwargs}
         self._logger._log(LogLevel.SUCCESS, message, extra=extra or None)
-    
+
     def warning(self, message: str, **kwargs: Any) -> None:
         """Log warning-level message."""
         if self.config.sanitize_messages:
             message = sanitize_message(message)
         extra = {**self._bound_context, **kwargs}
         self._logger._log(LogLevel.WARNING, message, extra=extra or None)
-    
+
     def error(self, message: str, **kwargs: Any) -> None:
         """Log error-level message."""
         if self.config.sanitize_messages:
             message = sanitize_message(message)
         extra = {**self._bound_context, **kwargs}
         self._logger._log(LogLevel.ERROR, message, extra=extra or None)
-    
+
     def critical(self, message: str, **kwargs: Any) -> None:
         """Log critical-level message."""
         extra = {**self._bound_context, **kwargs}
         self._logger._log(LogLevel.CRITICAL, message, extra=extra or None)
-    
+
     def exception(self, message: str, **kwargs: Any) -> None:
         """Log exception with traceback."""
         if self.config.sanitize_messages:
@@ -310,7 +310,7 @@ class Logger:
             raise
         except Exception as e:
             self._logger._log(LogLevel.ERROR, message, exception=e, extra=extra or None)
-    
+
     def log_structured(
         self,
         message: str,
@@ -352,9 +352,9 @@ class Logger:
         combined_extra = {**self._bound_context}
         if data:
             combined_extra.update(data)
-        
+
         self._logger._log(level_obj, message, extra=combined_extra or None)
-    
+
     def tail(self, n: int = 50) -> None:
         """
         Print the last N lines from the log file.
@@ -367,12 +367,12 @@ class Logger:
         if not self.log_file_path or not self.log_file_path.exists():
             print(f"Log file not found: {self.log_file_path}")
             return
-        
+
         try:
             with open(self.log_file_path, "r", encoding="utf-8") as f:
                 lines = f.readlines()
                 tail_lines = lines[-n:] if len(lines) > n else lines
-                
+
                 print(f"=== Last {len(tail_lines)} lines from {self.log_file_path.name} ===")
                 for line in tail_lines:
                     print(line.rstrip())
@@ -388,7 +388,7 @@ class Logger:
             with _logger_lock:
                 if self.name in _initialized_loggers:
                     _initialized_loggers.pop(self.name, None)
-    
+
     def upload_log_to_lakehouse(
         self,
         target_path: str,
@@ -396,29 +396,29 @@ class Logger:
     ) -> bool:
         """
         Upload log file to lakehouse storage at end of run.
-        
+
         This method performs a single-shot upload using platform-specific utilities.
         It will NOT perform remote appends or chunk-based uploads.
-        
+
         Args:
             target_path: Target path in lakehouse (e.g., "Files/logs/my_job.log")
             max_retries: Maximum number of retry attempts (default: 2)
-        
+
         Returns:
             True if upload succeeded, False otherwise
-        
+
         Behavior:
             - Fabric: Uses notebookutils.fs.put with overwrite=True
             - Databricks: Uses dbutils.fs.put with overwrite=True
             - Other: Logs warning and skips upload
-            
+
         Note:
             Failures are logged but do NOT raise exceptions to prevent
             job failures due to logging issues.
-        
+
         Example:
             ```python
-            logger = get_laketrace_logger("my_job")
+            logger = get_logger("my_job")
             # ... do work ...
             logger.upload_log_to_lakehouse("Files/logs/job_2024_01_15.log")
             ```
@@ -426,18 +426,18 @@ class Logger:
         if not self.log_file_path or not self.log_file_path.exists():
             self.warning(f"Cannot upload: log file not found at {self.log_file_path}")
             return False
-        
+
         platform = self.runtime_metadata.platform.value
-        
+
         try:
             # Read log file content once
             with open(self.log_file_path, "r", encoding="utf-8") as f:
                 log_content = f.read()
-            
+
             if not log_content:
                 self.warning("Log file is empty, skipping upload")
                 return False
-            
+
             # Attempt upload based on platform
             if platform == "fabric":
                 return self._upload_fabric(target_path, log_content, max_retries)
@@ -449,11 +449,11 @@ class Logger:
                     f"Log file remains at: {self.log_file_path}"
                 )
                 return False
-        
+
         except Exception as e:
             self.error(f"Unexpected error during log upload: {e}")
             return False
-    
+
     def _upload_fabric(
         self,
         target_path: str,
@@ -466,14 +466,14 @@ class Logger:
         except ImportError:
             self.warning("notebookutils not available in Fabric environment")
             return False
-        
+
         for attempt in range(max_retries + 1):
             try:
                 # Use fs.put with overwrite - single operation
                 notebookutils.fs.put(target_path, content, overwrite=True)
                 self.info(f"Successfully uploaded log to Fabric: {target_path}")
                 return True
-            
+
             except Exception as e:
                 if attempt < max_retries:
                     self.warning(
@@ -482,9 +482,9 @@ class Logger:
                 else:
                     self.error(f"Failed to upload log to Fabric after {max_retries + 1} attempts: {e}")
                     return False
-        
+
         return False
-    
+
     def _upload_databricks(
         self,
         target_path: str,
@@ -496,28 +496,28 @@ class Logger:
             # Import dbutils in Databricks context
             from pyspark.dbutils import DBUtils  # type: ignore
             from pyspark.sql import SparkSession
-            
+
             spark = SparkSession.getActiveSession()
             if not spark:
                 self.warning("No active Spark session for Databricks upload")
                 return False
-            
+
             dbutils = DBUtils(spark)
-        
+
         except ImportError:
             self.warning("dbutils not available in Databricks environment")
             return False
-        
+
         for attempt in range(max_retries + 1):
             try:
                 # Ensure target path has dbfs:/ prefix if not present
                 dbfs_path = target_path if target_path.startswith("dbfs:/") else f"dbfs:/{target_path}"
-                
+
                 # Use dbutils.fs.put with overwrite - single operation
                 dbutils.fs.put(dbfs_path, content, overwrite=True)
                 self.info(f"Successfully uploaded log to Databricks: {dbfs_path}")
                 return True
-            
+
             except Exception as e:
                 if attempt < max_retries:
                     self.warning(
@@ -528,9 +528,8 @@ class Logger:
                         f"Failed to upload log to Databricks after {max_retries + 1} attempts: {e}"
                     )
                     return False
-        
-        return False
 
+        return False
 
 
 def get_logger(
