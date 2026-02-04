@@ -1,5 +1,5 @@
 """
-Quick test to verify vendored logger works without external dependencies.
+Quick test to verify  logger works without external dependencies.
 """
 
 import sys
@@ -93,11 +93,11 @@ except Exception as e:
     sys.exit(1)
 
 print("\n" + "="*50)
-print("✅ All vendored logger tests passed!")
+print("✅ All logger tests passed!")
 print("="*50)
 print("\nKey Points:")
 print("  • Zero external dependencies (stdlib only)")
-print("  • Vendored logging engine (core_logger.py)")
+print("  • Laketrace Logging engine (core_logger.py)")
 print("  • Thread-safe with file rotation")
 print("  • Fabric + Databricks compatible")
 print("  • Production-ready implementation")

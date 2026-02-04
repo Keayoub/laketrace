@@ -10,7 +10,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from laketrace import (
     sanitize_message,
     mask_pii,
-    get_laketrace_logger,
+    get_logger,
     escape_newlines,
     escape_format_strings,
 )
@@ -58,7 +58,7 @@ print("   ✓ Sensitive fields masked")
 print()
 
 # Test 5: Logger with security config
-logger = get_laketrace_logger(
+logger = get_logger(
     "security_test",
     config={
         "sanitize_messages": True,

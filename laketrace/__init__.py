@@ -8,7 +8,7 @@ Zero external dependencies - uses only Python stdlib.
 
 Key Features:
 - Works identically in Fabric Notebooks, Fabric Spark Jobs, and Databricks
-- Vendored logging engine with no external dependencies
+- logging engine with no external dependencies
 - Safe local file rotation with size-based limits
 - Structured JSON output with runtime context
 - Stdout emission for job output visibility

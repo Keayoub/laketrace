@@ -1,7 +1,7 @@
 """
 LakeTrace Logger - Enterprise-grade logging for Fabric & Databricks.
 
-Vendored, zero-dependency implementation (stdlib only).
+zero-dependency implementation (stdlib only).
 Designed for security, performance, and multi-platform compatibility.
 
 Security Features:
