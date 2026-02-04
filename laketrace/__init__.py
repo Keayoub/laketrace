@@ -32,11 +32,37 @@ Example Usage:
 
 from laketrace.logger import LakeTraceLogger, get_laketrace_logger
 from laketrace.runtime import RuntimeDetector, stop_spark_if_active
+from laketrace.security import (
+    SecurityConfig,
+    sanitize_message,
+    mask_pii,
+    escape_newlines,
+    escape_format_strings,
+    get_secure_file_opener,
+)
+from laketrace.spark_integration import (
+    setup_logging_with_spark,
+    stop_spark_and_upload_logs,
+    SparkLogHandler,
+)
 
 __version__ = "1.0.0"
 __all__ = [
+    # Core API
     "LakeTraceLogger",
     "get_laketrace_logger",
+    # Runtime utilities
     "RuntimeDetector",
     "stop_spark_if_active",
+    # Security utilities
+    "SecurityConfig",
+    "sanitize_message",
+    "mask_pii",
+    "escape_newlines",
+    "escape_format_strings",
+    "get_secure_file_opener",
+    # Spark integration
+    "setup_logging_with_spark",
+    "stop_spark_and_upload_logs",
+    "SparkLogHandler",
 ]

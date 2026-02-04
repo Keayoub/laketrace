@@ -8,6 +8,9 @@ All settings are designed to be safe for Spark driver usage.
 from typing import Any, Dict, Optional
 from pathlib import Path
 
+# Import is deferred to avoid circular imports
+# from laketrace.security import SecurityConfig
+
 
 class LakeTraceConfig:
     """Configuration container for LakeTrace logger."""
@@ -23,6 +26,10 @@ class LakeTraceConfig:
         "compression": "none",  # Options: "zip", "gz", "none"
         "add_runtime_context": True,  # Add platform/runtime metadata
         "enqueue": False,  # Use background queue for sinks
+        # Security settings
+        "sanitize_messages": True,  # Prevent log injection attacks
+        "mask_pii": False,  # Mask sensitive data (PII)
+        "secure_file_permissions": True,  # Use 0o600 for log files
     }
     
     VALID_LEVELS = {"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"}
@@ -129,3 +136,18 @@ class LakeTraceConfig:
     def enqueue(self) -> bool:
         """Check if sinks should use enqueue."""
         return self._config["enqueue"]
+
+    @property
+    def sanitize_messages(self) -> bool:
+        """Check if message sanitization is enabled."""
+        return self._config["sanitize_messages"]
+    
+    @property
+    def mask_pii(self) -> bool:
+        """Check if PII masking is enabled."""
+        return self._config["mask_pii"]
+    
+    @property
+    def secure_file_permissions(self) -> bool:
+        """Check if secure file permissions (0o600) are enabled."""
+        return self._config["secure_file_permissions"]

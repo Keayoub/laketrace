@@ -3,6 +3,11 @@ Core logging implementation using Loguru.
 
 Provides the LakeTraceLogger class with safe local file rotation,
 structured JSON output, and optional lakehouse storage integration.
+
+Security Features:
+- File permissions: Log files created with 0o600 (owner read/write only)
+- Log injection prevention: Newlines and special chars escaped by default
+- PII masking: Optional masking of sensitive fields
 """
 
 import json
@@ -17,6 +22,12 @@ from loguru import logger as loguru_logger
 
 from laketrace.config import LakeTraceConfig
 from laketrace.runtime import RuntimeDetector, get_run_id_from_environment
+from laketrace.security import (
+    get_secure_file_opener,
+    sanitize_message,
+    mask_pii,
+    SecurityConfig,
+)
 
 
 # Global lock to prevent duplicate handler registration
@@ -99,7 +110,7 @@ class LakeTraceLogger:
                 self._setup_stdout_sink()
     
     def _setup_file_sink(self) -> None:
-        """Configure local file sink with rotation."""
+        """Configure local file sink with rotation and secure permissions."""
         log_dir = Path(self.config.log_dir)
         log_dir.mkdir(parents=True, exist_ok=True)
         
@@ -117,6 +128,9 @@ class LakeTraceLogger:
         # Rotation size in bytes
         rotation_bytes = f"{self.config.rotation_mb} MB"
         
+        # Get secure file opener if enabled
+        opener = get_secure_file_opener() if self.config.secure_file_permissions else None
+        
         # Configure file handler
         self._logger.add(
             str(log_file),
@@ -127,6 +141,7 @@ class LakeTraceLogger:
             compression=self.config.compression if self.config.compression != "none" else None,
             enqueue=self.config.enqueue,
             catch=True,  # Don't let logging errors crash the application
+            opener=opener,  # Use secure permissions (0o600) if enabled
         )
     
     def _setup_stdout_sink(self) -> None:
@@ -255,18 +270,26 @@ class LakeTraceLogger:
     
     def info(self, message: str, **kwargs: Any) -> None:
         """Log info-level message."""
+        if self.config.sanitize_messages:
+            message = sanitize_message(message)
         self._logger.info(message, **kwargs)
     
     def success(self, message: str, **kwargs: Any) -> None:
         """Log success-level message."""
+        if self.config.sanitize_messages:
+            message = sanitize_message(message)
         self._logger.success(message, **kwargs)
     
     def warning(self, message: str, **kwargs: Any) -> None:
         """Log warning-level message."""
+        if self.config.sanitize_messages:
+            message = sanitize_message(message)
         self._logger.warning(message, **kwargs)
     
     def error(self, message: str, **kwargs: Any) -> None:
         """Log error-level message."""
+        if self.config.sanitize_messages:
+            message = sanitize_message(message)
         self._logger.error(message, **kwargs)
     
     def critical(self, message: str, **kwargs: Any) -> None:
@@ -275,7 +298,52 @@ class LakeTraceLogger:
     
     def exception(self, message: str, **kwargs: Any) -> None:
         """Log exception with traceback."""
+        if self.config.sanitize_messages:
+            message = sanitize_message(message)
         self._logger.exception(message, **kwargs)
+    
+    def log_structured(
+        self,
+        message: str,
+        level: str = "INFO",
+        data: Optional[Dict[str, Any]] = None,
+        mask_sensitive: bool = True,
+    ) -> None:
+        """
+        Log a message with structured data, with optional PII masking.
+
+        This is useful when logging dictionaries or structured data that may
+        contain sensitive information.
+
+        Args:
+            message: Primary log message
+            level: Log level (default: INFO)
+            data: Dictionary of structured data to include
+            mask_sensitive: Whether to mask PII in the data (default: True)
+
+        Example:
+            ```python
+            logger.log_structured(
+                "User login",
+                level="INFO",
+                data={"user": "john@example.com", "ip": "192.168.1.1"},
+                mask_sensitive=True
+            )
+            ```
+        """
+        if self.config.sanitize_messages:
+            message = sanitize_message(message)
+
+        # Mask PII if enabled
+        if data and (self.config.mask_pii or mask_sensitive):
+            data = mask_pii(data)
+
+        # Log with data as extra fields
+        log_method = getattr(self._logger, level.lower(), self._logger.info)
+        if data:
+            log_method(message, extra=data)
+        else:
+            log_method(message)
     
     def tail(self, n: int = 50) -> None:
         """

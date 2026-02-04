@@ -215,6 +215,60 @@ base_logger.info("Pipeline completed", total_runtime_seconds=125)
 base_logger.upload_log_to_lakehouse("Files/logs/pipeline.log")
 ```
 
+### Example 5: Unified Spark Framework + Application Logging (RECOMMENDED)
+
+**Capture BOTH Spark framework logs AND your application logs in the same file:**
+
+```python
+from pyspark.sql import SparkSession
+from laketrace import setup_logging_with_spark, stop_spark_and_upload_logs
+
+# Initialize Spark
+spark = SparkSession.builder.appName("UnifiedETL").getOrCreate()
+
+# Setup unified logging (automatically redirects Spark logs to LakeTrace)
+logger = setup_logging_with_spark(
+    app_name="unified_etl",
+    spark_session=spark,
+    config={"level": "INFO", "json": True},
+    capture_spark_logs=True,  # Enable Spark log redirection
+)
+
+try:
+    logger.info("Starting ETL")
+    
+    # Spark framework logs are automatically captured
+    df = spark.read.parquet("Files/raw/sales")
+    logger.info(f"Loaded {df.count()} records")
+    
+    # Your application logs
+    df_clean = df.filter("is_active = true")
+    logger.info("Data cleaned", records_after=df_clean.count())
+    
+    df_clean.write.parquet("Files/output/sales")
+    logger.success("ETL completed")
+    
+finally:
+    # Cleanup and upload logs
+    stop_spark_and_upload_logs(
+        logger,
+        target_path="Files/logs/unified_etl.log",
+        spark_session=spark
+    )
+```
+
+**Output file contains BOTH:**
+```json
+{"timestamp": "...", "level": "INFO", "message": "Starting ETL"}
+{"timestamp": "...", "level": "INFO", "message": "DAGScheduler: Job 0 finished"}
+{"timestamp": "...", "level": "INFO", "message": "Loaded 50000 records"}
+{"timestamp": "...", "level": "INFO", "message": "TaskSchedulerImpl: Task 0 finished"}
+{"timestamp": "...", "level": "INFO", "message": "Data cleaned", "records_after": 49500}
+{"timestamp": "...", "level": "SUCCESS", "message": "ETL completed"}
+```
+
+✅ **All logs in one place!**
+
 ## 🧵 Microsoft Fabric Specific Guidance
 
 ### Fabric Notebook Usage
@@ -247,7 +301,37 @@ In Spark jobs, keep logging on the driver only and use end-of-run upload:
 - Use a stable log path under `Files/` so it lands in the Lakehouse.
 - Avoid logging from executors (use `print()` there).
 
-Example pattern:
+Example pattern with unified logging:
+
+```python
+from pyspark.sql import SparkSession
+from laketrace import setup_logging_with_spark, stop_spark_and_upload_logs
+
+def main():
+    spark = SparkSession.builder.appName("FabricJob").getOrCreate()
+    
+    # Setup unified logging for Spark + app
+    logger = setup_logging_with_spark(
+        app_name="fabric_job",
+        spark_session=spark,
+        capture_spark_logs=True
+    )
+    
+    try:
+        logger.info("Job started")
+        # Spark + app logs both captured
+        df = spark.read.parquet("Files/raw/data")
+        logger.info(f"Processed {df.count()} records")
+    finally:
+        stop_spark_and_upload_logs(
+            logger,
+            "Files/logs/fabric_job.log",
+            spark
+        )
+
+if __name__ == "__main__":
+    main()
+```
 
 ```python
 from laketrace import get_laketrace_logger, stop_spark_if_active
@@ -395,6 +479,124 @@ Utility class for environment detection:
 Safely stops active SparkSession if present.
 
 ## ⚠️ Important Notes
+
+### Security Best Practices
+
+LakeTrace includes built-in security features to protect your logs:
+
+#### 1. **Message Sanitization** (Enabled by default)
+
+Prevents log injection attacks by escaping newlines and carriage returns:
+
+```python
+from laketrace import sanitize_message
+
+# Sanitize user input before logging
+user_input = "Admin\nINFO Fake entry"
+safe_input = sanitize_message(user_input)
+logger.info(f"User action: {safe_input}")
+# Output: "User action: Admin\nINFO Fake entry" (newline escaped)
+```
+
+To disable sanitization (not recommended):
+
+```python
+logger = get_laketrace_logger(
+    "my_job",
+    config={"sanitize_messages": False}
+)
+```
+
+#### 2. **File Permissions** (Enabled by default)
+
+Log files are created with `0o600` permissions (owner read/write only):
+
+```python
+logger = get_laketrace_logger(
+    "my_job",
+    config={"secure_file_permissions": True}  # Default
+)
+# Log file: -rw------- (only owner can read)
+```
+
+To use default permissions instead:
+
+```python
+logger = get_laketrace_logger(
+    "my_job",
+    config={"secure_file_permissions": False}
+)
+# Log file: -rw-r--r-- (world readable)
+```
+
+#### 3. **PII Masking** (Disabled by default)
+
+Optional masking of sensitive data (emails, passwords, tokens, etc.):
+
+```python
+from laketrace import mask_pii
+
+logger = get_laketrace_logger(
+    "my_job",
+    config={"mask_pii": True}  # Enable PII masking
+)
+
+# Log structured data with automatic masking
+logger.log_structured(
+    "User authentication",
+    level="INFO",
+    data={
+        "user": "john@example.com",
+        "password": "secret123",
+        "api_key": "sk-1234567890",
+    },
+    mask_sensitive=True
+)
+# Output: Sensitive fields replaced with "***"
+```
+
+Custom PII patterns:
+
+```python
+from laketrace import SecurityConfig, mask_pii
+
+config = SecurityConfig(
+    enable_pii_masking=True,
+    pii_patterns={
+        "custom_field": r"CUSTOM_\d{8}",
+        "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+    }
+)
+
+data = {"custom_field": "CUSTOM_12345678", "email": "user@example.com"}
+masked = mask_pii(data, config)
+# Result: {"custom_field": "***", "email": "***"}
+```
+
+#### 4. **String Format Protection**
+
+Prevent format string exploits with `escape_format_strings()`:
+
+```python
+from laketrace import escape_format_strings
+
+user_input = "Hello {value.__class__}"
+safe = escape_format_strings(user_input)
+logger.info(safe)  # Braces escaped, prevents introspection
+```
+
+### Security Configuration Summary
+
+```python
+logger = get_laketrace_logger(
+    "secure_job",
+    config={
+        "sanitize_messages": True,           # Escape newlines (default: True)
+        "mask_pii": False,                   # Mask sensitive data (default: False)
+        "secure_file_permissions": True,     # Use 0o600 permissions (default: True)
+    }
+)
+```
 
 ### Spark Executor Warning
 
