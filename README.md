@@ -66,7 +66,37 @@ logger = get_logger(
 )
 ```
 
-## 🔄 Migration Guides
+## � Supported Features
+
+LakeTrace provides comprehensive logging capabilities organized by feature category:
+
+### Core Features (Proven & Stable)
+- **Rotation**: Size-based (MB), time-based (hourly/daily/weekly/monthly), interval-based, and callable rotation strategies
+- **Retention**: File count-based and time-based cleanup policies
+- **Compression**: Gzip, bzip2, and ZIP archive support for rotated logs
+- **Handler Management**: Track and manage multiple log file handlers with unique IDs
+- **Async I/O**: Enqueue mode for high-throughput workloads with background thread writing
+
+### Advanced Features
+- **Custom Formatters**: Apply custom message formatting rules
+- **Custom Filters**: Control which records get logged
+- **Callbacks**: Hook into log lifecycle events
+- **Multiprocessing Safety**: Thread-safe operations across distributed Spark environments
+- **Error Catching**: Optional exception handler prevents formatter errors from breaking jobs
+
+### Performance Features
+- **Throughput Optimization**: Handle high-volume logging without performance degradation
+- **Memory Efficiency**: Minimal overhead in memory usage during execution
+- **Concurrency Support**: Safe operation with concurrent logging from multiple threads
+
+### Security Features
+- **Message Sanitization**: Remove or mask sensitive data from logs
+- **PII Masking**: Automatic detection and redaction of personally identifiable information
+- **Format String Escaping**: Prevent format string vulnerabilities
+- **Newline Escaping**: Sanitize log content to prevent log injection attacks
+- **Secure Permissions**: Control file access in shared environments
+
+## �🔄 Migration Guides
 
 ### From SparkLogger
 

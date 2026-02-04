@@ -37,7 +37,7 @@ from laketrace.security import (
     escape_format_strings,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __all__ = [
     # Core API
     "Logger",
@@ -52,4 +52,3 @@ __all__ = [
     "escape_newlines",
     "escape_format_strings",
 ]
-

@@ -134,3 +134,4 @@ Thumbs.db
 logs/
 /tmp/
 .github/agents/laketrace.agent.md
+laketrace/__init__.py.bak
