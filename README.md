@@ -215,6 +215,78 @@ base_logger.info("Pipeline completed", total_runtime_seconds=125)
 base_logger.upload_log_to_lakehouse("Files/logs/pipeline.log")
 ```
 
+## 🧵 Microsoft Fabric Specific Guidance
+
+### Fabric Notebook Usage
+
+Use LakeTrace in the notebook driver process and keep logging simple and light:
+
+- Use `get_laketrace_logger()` once per notebook.
+- Use `logger.tail()` for quick inspection during interactive work.
+- Upload logs at the end with `upload_log_to_lakehouse()`.
+
+Example pattern:
+
+```python
+from laketrace import get_laketrace_logger
+
+logger = get_laketrace_logger("fabric_notebook")
+logger.info("Notebook started")
+
+# ... work ...
+
+logger.tail(20)
+logger.upload_log_to_lakehouse("Files/logs/notebook_run.log")
+```
+
+### Fabric Spark Job Definitions
+
+In Spark jobs, keep logging on the driver only and use end-of-run upload:
+
+- Call `stop_spark_if_active()` in `finally`.
+- Use a stable log path under `Files/` so it lands in the Lakehouse.
+- Avoid logging from executors (use `print()` there).
+
+Example pattern:
+
+```python
+from laketrace import get_laketrace_logger, stop_spark_if_active
+
+logger = get_laketrace_logger("fabric_job")
+
+try:
+    # Spark work on driver
+    logger.info("Job started")
+    # ... work ...
+finally:
+    logger.upload_log_to_lakehouse("Files/logs/fabric_job.log")
+    stop_spark_if_active()
+```
+
+## ⚡ High Concurrency Mode Tuning (Fabric)
+
+High Concurrency Mode shares a single Spark session across notebooks. LakeTrace is safe for this mode when used on the driver. For best performance and lower contention:
+
+- Keep logging **driver-only**; avoid executor logging.
+- Use `INFO` or `WARNING` for busy notebooks.
+- Consider `stdout=False` if job output becomes noisy.
+- Keep `enqueue=False` (default) to avoid background queue overhead in shared sessions.
+
+Recommended config for busy concurrent notebooks:
+
+```python
+logger = get_laketrace_logger(
+    "fabric_concurrent",
+    config={
+        "level": "INFO",
+        "stdout": False,
+        "enqueue": False,
+        "rotation_mb": 20,
+        "retention_files": 10,
+    }
+)
+```
+
 ## ⚙️ Configuration
 
 Configure the logger by passing a configuration dictionary:
