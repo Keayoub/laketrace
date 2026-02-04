@@ -49,8 +49,6 @@ def test_rotation_size():
     """Test size-based rotation"""
     print("\n=== Test: rotation by size ===")
     with tempfile.TemporaryDirectory() as tmpdir:
-        log_file = os.path.join(tmpdir, "app.log")
-        
         # Create logger with size-based rotation (5 KB)
         logger = get_logger("test_rotation", config={
             "log_dir": tmpdir,
@@ -66,7 +64,8 @@ def test_rotation_size():
         logger.close()
         
         # Check that multiple log files were created
-        log_files = [f for f in os.listdir(tmpdir) if f.startswith("app.log")]
+        # Logger name is "test_rotation" so files start with "test_rotation"
+        log_files = [f for f in os.listdir(tmpdir) if f.startswith("test_rotation")]
         assert len(log_files) > 1, f"Expected multiple rotated files, got {log_files}"
         print(f"[PASS] Size-based rotation created {len(log_files)} files")
 
@@ -143,15 +142,16 @@ def test_rotation_class_methods():
     print("\n=== Test: Rotation class methods ===")
     
     # Test forward_day
-    next_day = Rotation.forward_day()
+    now = datetime.now()
+    next_day = Rotation.forward_day(now)
     assert isinstance(next_day, datetime), "forward_day should return datetime"
-    assert next_day > datetime.now(), "forward_day should be in future"
+    assert next_day > now, "forward_day should be in future"
     print(f"[PASS] forward_day: {next_day}")
     
     # Test forward_interval
-    next_time = Rotation.forward_interval(timedelta(hours=1))
+    next_time = Rotation.forward_interval(now, timedelta(hours=1))
     assert isinstance(next_time, datetime), "forward_interval should return datetime"
-    assert next_time > datetime.now(), "forward_interval should be in future"
+    assert next_time > now, "forward_interval should be in future"
     print(f"[PASS] forward_interval: {next_time}")
 
 
