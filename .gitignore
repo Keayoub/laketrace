@@ -135,3 +135,5 @@ logs/
 /tmp/
 .github/agents/laketrace.agent.md
 laketrace/__init__.py.bak
+pyproject.toml.bak
+README.md.bak
