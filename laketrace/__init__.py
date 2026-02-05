@@ -37,7 +37,7 @@ from laketrace.security import (
     escape_format_strings,
 )
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __all__ = [
     # Core API
     "Logger",
