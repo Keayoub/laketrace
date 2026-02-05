@@ -156,21 +156,28 @@ for i in range(1000):
 logger.upload_log_to_lakehouse("/Files/logs/job.log")
 ```
 
-## 🧪 Workload Test Runner
+## 🧪 Testing
 
-Run the consolidated workload tests:
+Run the unified test suite:
 
 ```bash
-python tests/run_workloads.py
+python tests/run_tests.py          # Full suite (~30 seconds)
+python tests/run_tests.py --quick  # Quick feedback (~2 seconds)
 ```
 
-Workload groups live under:
+For complete testing guide, see [docs/TESTING.md](docs/TESTING.md)
 
-- [tests/workloads/basic](tests/workloads/basic)
-- [tests/workloads/core](tests/workloads/core)
-- [tests/workloads/advanced](tests/workloads/advanced)
-- [tests/workloads/performance](tests/workloads/performance)
-- [tests/workloads/security](tests/workloads/security)
+## 🔐 Security
+
+LakeTrace provides built-in security features to prevent data leaks:
+
+- **Field Whitelisting** - Control what fields get logged
+- **PII Masking** - Auto-detect and mask sensitive data
+- **Data Leak Detection** - Monitor for suspicious patterns
+- **Log Integrity** - Verify logs haven't been tampered with
+- **Secure Permissions** - Control file access in shared environments
+
+For complete security guide, see [docs/SECURITY.md](docs/SECURITY.md)
 
 ## ✅ Safety Notes
 

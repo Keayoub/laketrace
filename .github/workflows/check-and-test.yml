@@ -30,9 +30,13 @@ jobs:
           # Exit-zero treats all errors as warnings
           flake8 laketrace --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
-      - name: Run workload tests
+      - name: Install package
         run: |
-          python tests/run_workloads.py
+          pip install -e .
+
+      - name: Run tests
+        run: |
+          python tests/run_tests.py
 
       - name: Build and Check Package
         run: |

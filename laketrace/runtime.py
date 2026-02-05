@@ -232,15 +232,42 @@ class RuntimeDetector:
     @staticmethod
     def _is_databricks() -> bool:
         """Check if running in Databricks environment."""
-        # Try importing dbutils (Databricks-specific module)
-        try:
-            from pyspark.dbutils import DBUtils  # type: ignore
+        # Check for Databricks environment variables first (fastest, safest)
+        if "DATABRICKS_RUNTIME_VERSION" in os.environ:
             return True
-        except ImportError:
+        
+        # Check for DATABRICKS_ prefixed environment variables
+        if any(var.startswith("DATABRICKS_") for var in os.environ.keys()):
+            return True
+        
+        # Try importing dbutils (Databricks-specific module) - last resort
+        # Note: This can be slow/hang in some environments, so we only try if env vars indicate Databricks
+        try:
+            # Use a timeout approach to avoid hanging
+            import signal
+            
+            def timeout_handler(signum, frame):
+                raise TimeoutError("dbutils import timeout")
+            
+            # Only set timeout on Unix-like systems
+            if hasattr(signal, 'SIGALRM'):
+                old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(2)  # 2 second timeout
+            
+            try:
+                from pyspark.dbutils import DBUtils  # type: ignore
+                if hasattr(signal, 'SIGALRM'):
+                    signal.alarm(0)  # Cancel the alarm
+                return True
+            except TimeoutError:
+                return False
+            finally:
+                if hasattr(signal, 'SIGALRM'):
+                    signal.signal(signal.SIGALRM, old_handler)
+        except (ImportError, AttributeError, Exception):
             pass
         
-        # Check for Databricks environment variables
-        return "DATABRICKS_RUNTIME_VERSION" in os.environ
+        return False
     
     @staticmethod
     def _is_spark() -> bool:
